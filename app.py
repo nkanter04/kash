@@ -1,0 +1,515 @@
+"""Stock analysis backend.
+
+Pulls quotes, price history and financial statements from Yahoo Finance (via yfinance),
+reshapes them into friendly, labeled tables with plain-English explanations, and computes
+a simple scorecard. Run with:  python -m uvicorn app:app --port 8050
+"""
+from __future__ import annotations
+
+import math
+import threading
+import time
+from pathlib import Path
+
+import pandas as pd
+import yfinance as yf
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+import sec
+from rows import BALANCE_ROWS, CASHFLOW_ROWS, INCOME_ROWS, RATIO_ROWS
+
+STATIC = Path(__file__).parent / "static"
+CACHE_SECONDS = 15 * 60
+_cache: dict[str, tuple[float, dict]] = {}
+_lock = threading.Lock()
+
+app = FastAPI(title="Stock Analysis")
+
+
+# ---------------------------------------------------------------- helpers
+
+def clean(v):
+    """Make a value JSON-safe (NaN/inf -> None, numpy -> python)."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return v
+    if math.isnan(f) or math.isinf(f):
+        return None
+    return f
+
+
+def div(a, b):
+    if a is None or b is None or b == 0:
+        return None
+    return a / b
+
+
+def growth(cur, prev):
+    if cur is None or prev is None or prev == 0:
+        return None
+    return (cur - prev) / abs(prev)
+
+
+def get(df: pd.DataFrame, names, col):
+    """First non-null value among candidate row names for a column."""
+    if df is None or df.empty:
+        return None
+    if isinstance(names, str):
+        names = [names]
+    for n in names:
+        if n in df.index:
+            v = clean(df.at[n, col])
+            if v is not None:
+                return v
+    return None
+
+
+def ttm_frame(q: pd.DataFrame) -> pd.Series | None:
+    """Sum the most recent four quarters of a flow statement (None if fewer than 4)."""
+    if q is None or q.empty or q.shape[1] < 4:
+        return None
+    last4 = q.iloc[:, :4]
+    # only keep rows where all 4 quarters exist
+    ok = last4.notna().all(axis=1)
+    out = last4[ok].sum(axis=1)
+    # share counts are levels, not flows: use the latest quarter instead of a sum
+    for row in ("Diluted Average Shares", "Basic Average Shares"):
+        if row in out.index:
+            out[row] = last4.at[row, last4.columns[0]]
+    return out
+
+
+class PriceBook:
+    """Look up the split-adjusted (not dividend-adjusted) close at any date."""
+
+    def __init__(self, hist: pd.DataFrame):
+        self.hist = hist
+        splits = hist["Stock Splits"] if "Stock Splits" in hist else pd.Series(dtype=float)
+        self.splits = splits[splits > 0]
+
+    def price_at(self, date) -> float | None:
+        if self.hist.empty:
+            return None
+        ts = pd.Timestamp(date)
+        idx = self.hist.index
+        if idx.tz is not None:
+            ts = ts.tz_localize(idx.tz) if ts.tzinfo is None else ts.tz_convert(idx.tz)
+        sub = self.hist.loc[:ts]
+        if sub.empty:
+            return None
+        # yfinance closes (auto_adjust=False) are already split-adjusted to today's share basis,
+        # the same basis as Yahoo's share counts/EPS and our split-normalized SEC figures
+        return clean(sub["Close"].iloc[-1])
+
+
+# ---------------------------------------------------------------- statements
+
+def build_table(rows, frames: dict, columns: list[dict], context: dict) -> list[dict]:
+    """Turn row specs into [{key,label,desc,fmt,values:[...]}] aligned with columns."""
+    out = []
+    computed: dict[str, list] = {}
+    for spec in rows:
+        vals = []
+        for i, c in enumerate(columns):
+            if "calc" in spec:
+                v = spec["calc"](computed, i, c, context)
+            else:
+                v = c["get"](spec["src"])
+                if v is not None and spec.get("negate"):
+                    v = -v
+            vals.append(clean(v))
+        computed[spec["key"]] = vals
+        if spec.get("hidden"):
+            continue
+        if all(v is None for v in vals):
+            continue
+        out.append({
+            "key": spec["key"],
+            "label": spec["label"],
+            "desc": spec.get("desc", ""),
+            "fmt": spec.get("fmt", "money"),
+            "style": spec.get("style", ""),
+            "values": vals,
+        })
+    return out
+
+
+def make_columns(df: pd.DataFrame, period: str, ttm: pd.Series | None = None, keep=None):
+    cols = []
+    if ttm is not None:
+        cols.append({"label": "TTM", "date": None,
+                     "get": (lambda s, t=ttm: _series_get(t, s))})
+    for c in df.columns:
+        if keep is not None and c not in keep:
+            continue
+        label = f"FY {c.year}" if period == "annual" else c.strftime("%b %Y")
+        cols.append({"label": label, "date": c.strftime("%Y-%m-%d"),
+                     "get": (lambda s, col=c: get(df, s, col))})
+    return cols
+
+
+def _series_get(series: pd.Series, names):
+    if isinstance(names, str):
+        names = [names]
+    for n in names:
+        if n in series.index:
+            v = clean(series[n])
+            if v is not None:
+                return v
+    return None
+
+
+def merge_sec(sec_df: pd.DataFrame | None, yahoo_df: pd.DataFrame | None) -> pd.DataFrame:
+    """SEC values win cell-by-cell; Yahoo fills rows/years SEC lacks. Columns newest first."""
+    if sec_df is None or sec_df.empty:
+        return yahoo_df
+    if yahoo_df is None or yahoo_df.empty:
+        return sec_df
+    y = yahoo_df.copy()
+    # snap Yahoo dates onto SEC fiscal-year ends that are within a few weeks (52/53-week years)
+    rename = {}
+    for c in y.columns:
+        near = [sc for sc in sec_df.columns if abs((sc - c).days) <= 20]
+        if near:
+            rename[c] = near[0]
+    y = y.rename(columns=rename)
+    y = y.loc[:, ~y.columns.duplicated()]
+    out = sec_df.combine_first(y)
+    return out[sorted(out.columns, reverse=True)]
+
+
+def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_frames=None) -> dict:
+    if period == "annual":
+        inc, bal, cf = t.income_stmt, t.balance_sheet, t.cashflow
+        if sec_frames:
+            inc, bal, cf = (merge_sec(a, b) for a, b in zip(sec_frames, (inc, bal, cf)))
+        qinc, qcf = t.quarterly_income_stmt, t.quarterly_cashflow
+        inc_ttm, cf_ttm = ttm_frame(qinc), ttm_frame(qcf)
+        # if the latest quarter IS the fiscal year end, TTM just duplicates the FY column
+        if qinc is not None and not qinc.empty and inc is not None and not inc.empty                 and qinc.columns[0] <= inc.columns.max():
+            inc_ttm = cf_ttm = None
+    else:
+        inc, bal, cf = t.quarterly_income_stmt, t.quarterly_balance_sheet, t.quarterly_cashflow
+        inc_ttm = cf_ttm = None
+
+    if inc is None or inc.empty:
+        return {"columns": [], "income": [], "balance": [], "cashflow": [], "ratios": []}
+
+    # drop sparse columns (Yahoo often returns an almost-empty oldest period)
+    keep = [c for c in inc.columns if get(inc, ["Total Revenue", "Net Income"], c) is not None]
+    keep = sorted(keep, reverse=True)
+
+    inc_cols = make_columns(inc, period, inc_ttm, keep)
+    cf_keep = [c for c in cf.columns if c in keep] if cf is not None and not cf.empty else []
+    cf_cols = make_columns(cf, period, cf_ttm, cf_keep) if cf_keep else []
+    bal_keep = [c for c in bal.columns if c in keep] if bal is not None and not bal.empty else []
+    bal_cols = make_columns(bal, period, None, bal_keep) if bal_keep else []
+
+    # balance sheet for TTM column = latest quarter balance sheet
+    qbal = t.quarterly_balance_sheet if period == "annual" else bal
+    latest_q = qbal.columns[0] if qbal is not None and not qbal.empty else None
+
+    ctx = {"period": period, "info": info}
+    income = build_table(INCOME_ROWS, {}, inc_cols, ctx)
+    balance = build_table(BALANCE_ROWS, {}, bal_cols, ctx)
+    cashflow = build_table(CASHFLOW_ROWS, {}, cf_cols, ctx)
+
+    # ---- ratios: one column per income column, mixing all three statements
+    ratio_cols = []
+    src_cols = list(inc_cols)
+    if period == "annual" and src_cols and src_cols[0]["date"] is not None:
+        # no separate TTM column: "Current" ratios use today's price on the latest fiscal year
+        src_cols.insert(0, {"label": "TTM", "date": None, "get": src_cols[0]["get"], "_cf": cf_cols[0]["get"] if cf_cols else None})
+    for c in src_cols:
+        date = c["date"]
+        if date is None:  # TTM -> live price & latest balance sheet
+            price = clean(info.get("currentPrice") or info.get("regularMarketPrice"))
+            bget = (lambda s, col=latest_q: get(qbal, s, col)) if latest_q is not None else (lambda s: None)
+            if c.get("_cf"):
+                cget = c["_cf"]
+            else:
+                cget = cf_cols[0]["get"] if cf_cols and cf_cols[0]["date"] is None else (lambda s: None)
+            label = "Current"
+        else:
+            price = prices.price_at(date)
+            ts = pd.Timestamp(date)
+            bget = (lambda s, col=ts: get(bal, s, col)) if ts in bal.columns else (lambda s: None)
+            cget = (lambda s, col=ts: get(cf, s, col)) if cf is not None and ts in cf.columns else (lambda s: None)
+            label = c["label"]
+        ratio_cols.append({
+            "label": label, "date": date, "price": price,
+            "inc": c["get"], "bal": bget, "cf": cget,
+            "annualize": 4 if (period == "quarterly") else 1,
+        })
+    ratios = build_ratios(ratio_cols)
+
+    def strip(cols):
+        return [{"label": c["label"], "date": c["date"]} for c in cols]
+
+    return {
+        "columns": {"income": strip(inc_cols), "balance": strip(bal_cols),
+                    "cashflow": strip(cf_cols), "ratios": [{"label": c["label"], "date": c["date"]} for c in ratio_cols]},
+        "income": income, "balance": balance, "cashflow": cashflow, "ratios": ratios,
+    }
+
+
+def build_ratios(cols) -> list[dict]:
+    out = []
+    for spec in RATIO_ROWS:
+        vals = [clean(spec["calc"](c)) for c in cols]
+        if all(v is None for v in vals):
+            continue
+        out.append({"key": spec["key"], "label": spec["label"], "desc": spec["desc"],
+                    "fmt": spec["fmt"], "style": spec.get("style", ""), "values": vals})
+    return out
+
+
+# ---------------------------------------------------------------- scorecard
+
+def series_of(table, key):
+    for r in table:
+        if r["key"] == key:
+            return r["values"]
+    return None
+
+
+def scorecard(fin: dict, info: dict) -> list[dict]:
+    """Plain-English pass/fail checks, in the spirit of a report card."""
+    _CUR.code = info.get("financialCurrency") or info.get("currency")
+    inc, bal, cf, rat = fin["income"], fin["balance"], fin["cashflow"], fin["ratios"]
+    cols = fin["columns"]["income"] if fin["columns"] else []
+    # annual-only values (skip TTM column)
+    off = 1 if cols and cols[0]["label"] == "TTM" else 0
+    checks = []
+
+    def annual(table, key):
+        s = series_of(table, key)
+        return list(s[off:off + 6]) if s else []  # last 6 fiscal years = a 5-year window
+
+    # 1. Growth
+    rev = [v for v in annual(inc, "revenue") if v is not None]
+    if len(rev) >= 2:
+        yrs = len(rev) - 1
+        cagr = (rev[0] / rev[-1]) ** (1 / yrs) - 1 if rev[-1] and rev[0] > 0 and rev[-1] > 0 else None
+        if cagr is not None:
+            ok = round(cagr, 3) >= 0.05
+            checks.append({
+                "key": "growth", "title": "Growing sales",
+                "pass": ok,
+                "value": cagr, "fmt": "pct",
+                "text": f"Revenue grew about {cagr*100:.1f}% per year over the last {yrs} years."
+                        + (" That's healthy growth." if ok else " That's slower than the ~5% we'd like to see."),
+            })
+
+    # 2. Profitability
+    nm = info.get("profitMargins")
+    if nm is None:
+        nmarg = annual(inc, "net_margin")
+        nm = nmarg[0] if nmarg else None
+    if nm is not None:
+        checks.append({
+            "key": "profit", "title": "Profitable",
+            "pass": nm >= 0.10, "value": nm, "fmt": "pct",
+            "text": f"Keeps {nm*100:.1f}¢ of profit from every $1 of sales."
+                    + (" Strong margins." if nm >= 0.10 else (" Profitable, but margins are thin." if nm > 0 else " Currently losing money.")),
+        })
+
+    # 3. Cash generation
+    fcf = [v for v in annual(cf, "fcf") if v is not None]
+    if fcf:
+        pos = sum(1 for v in fcf if v > 0)
+        checks.append({
+            "key": "cash", "title": "Generates cash",
+            "pass": pos == len(fcf), "value": fcf[0], "fmt": "money",
+            "text": f"Produced positive free cash flow in {pos} of the last {len(fcf)} years."
+                    + (" Cash keeps coming in after paying for investments." if pos == len(fcf) else " Cash generation has been inconsistent."),
+        })
+
+    # 4. Return on invested capital (5-year average; ratio column 0 is "Current")
+    roic = [v for v in (series_of(rat, "roic") or [])[1:6] if v is not None]
+    if roic:
+        avg = sum(roic) / len(roic)
+        ok = round(avg, 3) >= 0.10
+        checks.append({
+            "key": "roic", "title": "Uses capital well",
+            "pass": ok, "value": avg, "fmt": "pct",
+            "text": f"Earned about {avg*100:.1f}¢ a year on every $1 invested in the business "
+                    f"(average return on invested capital over {len(roic)} years)."
+                    + (" A sign of a strong business." if ok else " Below the ~10% that marks a high-quality business."),
+        })
+
+    # 5. Financial health
+    cash = info.get("totalCash")
+    debt = info.get("totalDebt")
+    cr = info.get("currentRatio")
+    if cash is not None and debt is not None:
+        net = cash - debt
+        ok = net >= 0 or (cr is not None and cr >= 1.0 and debt < 3 * (info.get("ebitda") or 0))
+        checks.append({
+            "key": "health", "title": "Solid balance sheet",
+            "pass": bool(ok), "value": net, "fmt": "money",
+            "text": (f"Has more cash than debt today (net cash of {_short(net)})." if net >= 0
+                     else f"Today it owes {_short(-net)} more in debt than it holds in cash. "
+                          + ("Earnings cover it comfortably." if ok else "That's a lot relative to earnings.")),
+        })
+
+    # 6. Valuation vs its own history
+    pe_all = series_of(rat, "pe") or []
+    pe_hist = [v for v in pe_all[1:11] if v is not None and v > 0]  # skip "Current"; last 10 years
+    pe_now = info.get("trailingPE")
+    if pe_now and pe_hist:
+        avg = sum(pe_hist) / len(pe_hist)
+        checks.append({
+            "key": "value", "title": "Fairly priced",
+            "pass": pe_now <= avg * 1.05, "value": pe_now, "fmt": "x",
+            "text": f"Trades at {pe_now:.1f}× earnings vs. its {len(pe_hist)}-year average of {avg:.1f}×."
+                    + (" Cheaper than usual." if pe_now < avg * 0.95 else (" About its normal price." if pe_now <= avg * 1.05 else " Pricier than usual.")),
+        })
+
+    # 7. Shareholder returns
+    shares = [v for v in annual(inc, "shares") if v is not None]
+    dy = info.get("dividendYieldCalc")
+    if len(shares) >= 2:
+        chg = shares[0] / shares[-1] - 1
+        rewarding = chg < -0.005 or (dy or 0) > 0.01
+        parts = []
+        if chg < -0.005:
+            parts.append(f"bought back stock (share count down {abs(chg)*100:.1f}%)")
+        elif chg > 0.02:
+            parts.append(f"issued new shares (share count up {chg*100:.1f}%)")
+        if dy:
+            parts.append(f"pays a {dy*100:.2f}% dividend")
+        text = ("It " + " and ".join(parts) + ".") if parts else "Share count is flat and there's no dividend."
+        checks.append({"key": "returns", "title": "Rewards shareholders", "pass": rewarding,
+                       "value": chg, "fmt": "pct", "text": text})
+
+    # 8. Analyst outlook
+    tgt, px = info.get("targetMeanPrice"), info.get("currentPrice")
+    n = info.get("numberOfAnalystOpinions")
+    if tgt and px:
+        up = tgt / px - 1
+        checks.append({
+            "key": "analysts", "title": "Analysts see upside",
+            "pass": up >= 0.10, "value": up, "fmt": "pct",
+            "text": f"{int(n) if n else 'Covering'} analysts' average target is ${tgt:,.2f}, "
+                    f"{abs(up)*100:.0f}% {'above' if up >= 0 else 'below'} today's price.",
+        })
+    return checks
+
+
+_CUR = threading.local()
+
+
+def _short(v):
+    cur = getattr(_CUR, "code", "USD") or "USD"
+    pre, post = ("$", "") if cur == "USD" else ("", f" {cur}")
+    a = abs(v)
+    for d, s in ((1e12, "T"), (1e9, "B"), (1e6, "M")):
+        if a >= d:
+            return f"{pre}{v/d:.1f}{s}{post}"
+    return f"{pre}{v:,.0f}{post}"
+
+
+# ---------------------------------------------------------------- endpoints
+
+INFO_KEYS = [
+    "longName", "shortName", "symbol", "exchange", "fullExchangeName", "currency", "financialCurrency",
+    "sector", "industry", "country", "website", "fullTimeEmployees", "longBusinessSummary",
+    "currentPrice", "regularMarketPrice", "previousClose", "regularMarketChange", "regularMarketChangePercent",
+    "marketCap", "enterpriseValue", "trailingPE", "forwardPE", "pegRatio", "trailingPegRatio", "priceToBook",
+    "priceToSalesTrailing12Months", "enterpriseToEbitda", "trailingEps", "forwardEps", "beta",
+    "dividendRate", "dividendYield", "payoutRatio", "fiftyTwoWeekHigh", "fiftyTwoWeekLow",
+    "fiftyDayAverage", "twoHundredDayAverage", "averageVolume", "sharesOutstanding",
+    "profitMargins", "grossMargins", "operatingMargins", "returnOnEquity", "returnOnAssets",
+    "revenueGrowth", "earningsGrowth", "totalCash", "totalDebt", "currentRatio", "debtToEquity",
+    "freeCashflow", "totalRevenue", "ebitda", "targetMeanPrice", "targetHighPrice", "targetLowPrice",
+    "targetMedianPrice", "numberOfAnalystOpinions", "recommendationKey", "recommendationMean",
+    "earningsTimestamp", "exDividendDate", "quoteType", "heldPercentInstitutions", "heldPercentInsiders",
+]
+
+
+def load(ticker: str) -> dict:
+    ticker = ticker.upper().strip()
+    with _lock:
+        hit = _cache.get(ticker)
+        if hit and time.time() - hit[0] < CACHE_SECONDS:
+            return hit[1]
+
+    t = yf.Ticker(ticker)
+    try:
+        raw = t.info or {}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not reach Yahoo Finance: {e}")
+    if not raw or (raw.get("regularMarketPrice") is None and raw.get("currentPrice") is None):
+        raise HTTPException(404, f"No data found for '{ticker}'.")
+    info = {k: clean(raw.get(k)) if not isinstance(raw.get(k), str) else raw.get(k) for k in INFO_KEYS}
+    if info.get("currentPrice") is None:
+        info["currentPrice"] = info.get("regularMarketPrice")
+    # Yahoo's dividendYield units are inconsistent (sometimes %, sometimes fraction): derive it
+    rate, px = info.get("dividendRate"), info.get("currentPrice")
+    info["dividendYieldCalc"] = rate / px if rate and px else None
+
+    hist = t.history(period="max", interval="1d", auto_adjust=False, actions=True)
+    prices = PriceBook(hist)
+    price_series = []
+    if not hist.empty:
+        closes = hist["Close"].dropna()
+        # daily for the last 10 years, weekly before that (keeps the payload small)
+        cutoff = closes.index[-1] - pd.Timedelta(days=3660)
+        closes = pd.concat([closes[closes.index < cutoff].iloc[::5], closes[closes.index >= cutoff]])
+        price_series = [[int(ts.timestamp() * 1000), round(float(v), 4)] for ts, v in closes.items()]
+
+    try:
+        sec_frames = sec.annual_frames(ticker, splits=prices.splits)
+    except Exception:  # noqa: BLE001  (SEC is a bonus; never break the page over it)
+        sec_frames = None
+    annual = statements(t, prices, info, "annual", sec_frames)
+    annual["source"] = "SEC EDGAR 10-K filings + Yahoo Finance" if sec_frames else "Yahoo Finance"
+    quarterly = statements(t, prices, info, "quarterly")
+
+    data = {
+        "ticker": ticker,
+        "info": info,
+        "prices": price_series,
+        "financials": {"annual": annual, "quarterly": quarterly},
+        "scorecard": scorecard(annual, info) if annual["income"] else [],
+        "updated": int(time.time()),
+    }
+    with _lock:
+        _cache[ticker] = (time.time(), data)
+    return data
+
+
+@app.get("/api/stock/{ticker}")
+def stock(ticker: str):
+    return load(ticker)
+
+
+@app.get("/api/search")
+def search(q: str):
+    q = q.strip()
+    if not q:
+        return []
+    try:
+        res = yf.Search(q, max_results=8, news_count=0).quotes
+    except Exception:  # noqa: BLE001
+        return []
+    return [
+        {"symbol": r.get("symbol"), "name": r.get("longname") or r.get("shortname"),
+         "exchange": r.get("exchDisp"), "type": r.get("typeDisp")}
+        for r in res if r.get("quoteType") in ("EQUITY", "ETF")
+    ]
+
+
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.get("/")
+@app.get("/stock/{ticker}")
+def index(ticker: str | None = None):
+    return FileResponse(STATIC / "index.html")

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stockwise</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a href="/" class="brand" data-link>
+        <span class="brand-mark">S</span><span>Stockwise</span>
+      </a>
+      <div class="search" id="search">
+        <input id="q" type="search" placeholder="Search a company or ticker…" autocomplete="off" spellcheck="false">
+        <ul id="suggest" class="suggest" hidden></ul>
+      </div>
+      <button class="theme-btn" id="themeBtn" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
+    </div>
+  </header>
+
+  <main id="app" class="wrap"></main>
+
+  <footer class="wrap foot">
+    Data from SEC EDGAR filings and Yahoo Finance (via yfinance); it may be delayed or contain errors.
+    The scorecard and estimates are simple rules of thumb for learning. Not investment advice.
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
