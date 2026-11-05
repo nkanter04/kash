@@ -41,6 +41,11 @@ single-page frontend (`static/`). Public repo: github.com/nkanter04/stockwise. S
 - Price chart: 1D/1W/1M come from `/api/prices/{ticker}?range=` (intraday 2m/5m/30m bars, cached 60 s) and
   are plotted by bar number so nights and weekends leave no flat gaps; 1D change is vs the prior session's
   close. 6M and longer use the daily series from `/api/stock` (weekly before the last 10 years).
+- Extended hours: 1D includes pre-market (4:00-9:30 ET) and after-hours (16:00-20:00 ET) bars, tagged per
+  point in `sessions` and shaded on the chart; the header shows `info.extended`. Compute extended % changes
+  yourself (Yahoo's `*ChangePercent` fields are in percent, unlike other fields), and outside regular hours
+  measure from the official close (`regularMarketPrice` / `previousClose`), not the last 2-minute bar.
+  The overnight session (20:00-4:00 ET) is not in Yahoo's data.
 - Frontend charts: Chart.js 4.4.1. Wait for the web font before drawing (Chart.js caches label widths).
 - The SEC requires a contact email in the User-Agent: `config.json` (gitignored; template in
   `config.example.json`) or `SEC_USER_AGENT`. Never commit `config.json` or put an email in code.

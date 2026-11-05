@@ -11,6 +11,7 @@ import threading
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 from fastapi import FastAPI, HTTPException
@@ -439,7 +440,29 @@ INFO_KEYS = [
     "freeCashflow", "totalRevenue", "ebitda", "targetMeanPrice", "targetHighPrice", "targetLowPrice",
     "targetMedianPrice", "numberOfAnalystOpinions", "recommendationKey", "recommendationMean",
     "earningsTimestamp", "exDividendDate", "quoteType", "heldPercentInstitutions", "heldPercentInsiders",
+    "marketState", "regularMarketTime", "preMarketPrice", "preMarketTime", "postMarketPrice", "postMarketTime",
+    "exchangeTimezoneName",
 ]
+
+
+def extended_quote(info: dict) -> dict | None:
+    """The pre-market or after-hours price to show beside the regular one (None during regular hours).
+
+    The change is computed from the regular price, because Yahoo's *ChangePercent fields mix units.
+    """
+    state, reg = info.get("marketState"), info.get("regularMarketPrice") or info.get("currentPrice")
+    if not reg or state == "REGULAR":
+        return None
+    pre, post = info.get("preMarketPrice"), info.get("postMarketPrice")
+    reg_t = info.get("regularMarketTime") or 0
+    if state == "PRE" and pre:
+        label, p, t = "Pre-market", pre, info.get("preMarketTime")
+    elif post and (info.get("postMarketTime") or 0) >= reg_t:
+        label, p, t = "After hours", post, info.get("postMarketTime")
+    else:
+        return None
+    return {"label": label, "price": p, "change": p - reg, "pct": p / reg - 1,
+            "time": int(t * 1000) if t else None}
 
 
 def load(ticker: str) -> dict:
@@ -462,6 +485,7 @@ def load(ticker: str) -> dict:
     # Yahoo's dividendYield units are inconsistent (sometimes %, sometimes fraction): derive it
     rate, px = info.get("dividendRate"), info.get("currentPrice")
     info["dividendYieldCalc"] = rate / px if rate and px else None
+    info["extended"] = extended_quote(info)
 
     hist = t.history(period="max", interval="1d", auto_adjust=False, actions=True)
     prices = PriceBook(hist)
@@ -505,6 +529,17 @@ INTRADAY_SECONDS = 60
 _intraday: dict[tuple[str, str], tuple[float, dict]] = {}
 
 
+def session_of(index: pd.DatetimeIndex) -> pd.Series:
+    """Label each bar 'pre', 'regular' or 'after' (US hours; other exchanges are all 'regular')."""
+    out = np.full(len(index), "regular", dtype=object)
+    if index.tz is None or str(index.tz) != "America/New_York":
+        return out
+    minutes = index.hour * 60 + index.minute
+    out[minutes < 9 * 60 + 30] = "pre"
+    out[minutes >= 16 * 60] = "after"
+    return out
+
+
 def intraday(ticker: str, rng: str) -> dict:
     """Intraday closes for a short range. 1D = the latest session, measured from the prior session's close."""
     ticker, rng = ticker.upper().strip(), rng.upper()
@@ -517,23 +552,27 @@ def intraday(ticker: str, rng: str) -> dict:
             return hit[1]
     period, interval = INTRADAY[rng]
     try:
-        hist = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=False)
+        # 1D includes pre-market (4:00-9:30 ET) and after-hours (16:00-20:00 ET) trading
+        hist = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=False, prepost=rng == "1D")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Could not reach Yahoo Finance: {e}")
     closes = hist["Close"].dropna() if not hist.empty else pd.Series(dtype=float)
     if closes.empty:
         raise HTTPException(404, f"No intraday prices for '{ticker}'.")
+    sessions = session_of(closes.index)
     base = None
     if rng == "1D":
         days = closes.index.normalize()
-        last = closes[days == days[-1]]
-        before = closes[days < days[-1]]
-        base = clean(before.iloc[-1]) if len(before) else None
-        closes = last
+        last, before = days == days[-1], days < days[-1]
+        # measured from the prior session's regular close, not its last after-hours trade
+        prev_regular = closes[before & (sessions == "regular")]
+        base = clean(prev_regular.iloc[-1]) if len(prev_regular) else None
+        closes, sessions = closes[last], sessions[last]
     data = {
         "range": rng,
         "tz": str(closes.index.tz) if closes.index.tz is not None else "UTC",
         "points": [[int(ts.timestamp() * 1000), round(float(v), 4)] for ts, v in closes.items()],
+        "sessions": [s[0] for s in sessions],   # "p"re-market, "r"egular, "a"fter hours
         "base": base if base is not None else round(float(closes.iloc[0]), 4),
         "baseIsPrevClose": base is not None,
     }

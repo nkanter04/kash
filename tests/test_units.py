@@ -195,3 +195,32 @@ def test_intraday_rejects_unknown_range():
     with pytest.raises(app.HTTPException) as e:
         app.intraday("AAPL", "5Y")
     assert e.value.status_code == 400
+
+
+# ---------------------------------------------------------------- extended hours
+
+def test_sessions_follow_us_market_hours():
+    idx = pd.DatetimeIndex(["2026-11-04 04:00", "2026-11-04 09:28", "2026-11-04 09:30",
+                            "2026-11-04 15:58", "2026-11-04 16:00", "2026-11-04 19:58"]).tz_localize("America/New_York")
+    assert list(app.session_of(idx)) == ["pre", "pre", "regular", "regular", "after", "after"]
+    tokyo = idx.tz_convert("Asia/Tokyo")
+    assert set(app.session_of(tokyo)) == {"regular"}   # other exchanges: no US session labels
+
+
+BASE_Q = {"regularMarketPrice": 100.0, "regularMarketTime": 1000}
+
+
+@pytest.mark.parametrize("extra,expected", [
+    ({"marketState": "REGULAR", "postMarketPrice": 101, "postMarketTime": 2000}, None),
+    ({"marketState": "POST", "postMarketPrice": 101, "postMarketTime": 2000}, ("After hours", 0.01)),
+    ({"marketState": "PREPRE", "postMarketPrice": 99, "postMarketTime": 2000}, ("After hours", -0.01)),
+    ({"marketState": "PRE", "preMarketPrice": 102, "preMarketTime": 3000}, ("Pre-market", 0.02)),
+    ({"marketState": "POST", "postMarketPrice": 101, "postMarketTime": 500}, None),   # stale: older than the close
+])
+def test_extended_quote(extra, expected):
+    q = app.extended_quote({**BASE_Q, **extra})
+    if expected is None:
+        assert q is None
+    else:
+        assert q["label"] == expected[0]
+        assert q["pct"] == pytest.approx(expected[1])

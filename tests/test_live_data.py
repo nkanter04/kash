@@ -105,3 +105,10 @@ def test_intraday_prices_are_dense(rng, min_points):
         assert d["baseIsPrevClose"]           # 1D change is measured from the prior session's close
         days = {pd.Timestamp(t, unit="ms").tz_localize("UTC").tz_convert(d["tz"]).date() for t in times}
         assert len(days) == 1                 # only the latest session
+
+
+def test_1d_includes_extended_hours():
+    d = app.intraday("AAPL", "1D")
+    assert len(d["sessions"]) == len(d["points"])
+    assert "r" in d["sessions"] or "p" in d["sessions"]
+    assert d["sessions"] == sorted(d["sessions"], key="pra".index)   # pre, then regular, then after

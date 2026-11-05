@@ -182,6 +182,7 @@ function renderStock() {
       <div class="price">
         <div class="big num">${pxStr(px)}</div>
         <div class="chg ${cls} num">${chg >= 0 ? "▲" : "▼"} ${pxStr(Math.abs(chg ?? 0))} (${(chgp ?? 0).toFixed(2)}%) <span class="muted" style="font-weight:500">today</span></div>
+        ${extendedLine(i, pxStr)}
       </div>
     </div>
     <div class="card stats">
@@ -393,6 +394,16 @@ function baseOpts(extra = {}) {
 function mk(id, cfg) { const el = document.getElementById(id); if (!el) return; state.charts.push(new Chart(el, cfg)); }
 const bar = (label, data, color, extra = {}) => ({ type: "bar", label, data, backgroundColor: color, borderRadius: 6, maxBarThickness: 38, ...extra });
 
+// "After hours: $350.78 ▲ $1.27 (+0.36%) · Nov 4, 7:59 PM EST" under the regular price
+function extendedLine(i, pxStr) {
+  const e = i.extended; if (!e) return "";
+  const up = e.change >= 0;
+  const when = e.time ? " · " + new Date(e.time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric",
+    minute: "2-digit", timeZoneName: "short", ...(i.exchangeTimezoneName ? { timeZone: i.exchangeTimezoneName } : {}) }) : "";
+  return `<div class="ext num" data-tip="Trades outside regular hours (9:30 AM–4 PM ET). Fewer buyers and sellers, so prices can jump more.">
+    ${esc(e.label)}: <b>${pxStr(e.price)}</b> <span class="${up ? "up" : "down"}">${up ? "▲" : "▼"} ${pxStr(Math.abs(e.change))} (${signed(e.pct, 2)})</span><span class="muted">${when}</span></div>`;
+}
+
 const INTRADAY = ["1D", "1W", "1M"];
 const intradayCache = {};   // "AAPL|1D" -> { at, data }
 
@@ -411,7 +422,7 @@ async function drawPrice() {
       } catch { data = null; }
       if (state.range !== rng || state.data !== d) return;   // user moved on while loading
     }
-    if (data && data.points.length > 1) return plotPrice(data.points, data.base, rng, data.tz, data.baseIsPrevClose);
+    if (data && data.points.length > 1) return plotPrice(data.points, data.base, rng, data.tz, data.baseIsPrevClose, data.sessions);
     $("#perf").textContent = "Intraday prices aren't available; showing daily closes.";
   }
   const pts = d.prices; if (!pts.length) return;
@@ -423,14 +434,55 @@ async function drawPrice() {
   plotPrice(s, s[0][1], rng, null, false);
 }
 
+const SESSION_NAME = { p: "Pre-market", a: "After hours" };
+
+// Shades pre-market and after-hours stretches of the 1D chart and labels them.
+const sessionBands = {
+  id: "sessionBands",
+  beforeDatasetsDraw(chart, _args, opts) {
+    const sess = opts.sessions; if (!sess) return;
+    const { ctx, chartArea: a, scales: { x } } = chart;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(a.left, a.top, a.width, a.height); ctx.clip();
+    for (let k = 0; k < sess.length;) {
+      if (sess[k] === "r") { k++; continue; }
+      let j = k; while (j + 1 < sess.length && sess[j + 1] === sess[k]) j++;
+      const x0 = x.getPixelForValue(k - 0.5), x1 = x.getPixelForValue(j + 0.5);
+      ctx.fillStyle = css("--soft"); ctx.globalAlpha = 0.9;
+      ctx.fillRect(x0, a.top, x1 - x0, a.height);
+      ctx.globalAlpha = 1; ctx.fillStyle = css("--ink-3");
+      ctx.font = `600 11px "Plus Jakarta Sans"`; ctx.textBaseline = "top";
+      if (x1 - x0 > 70) ctx.fillText(SESSION_NAME[sess[k]], x0 + 8, a.top + 6);
+      k = j + 1;
+    }
+    ctx.restore();
+  },
+};
+
 // Intraday ranges (tz set) are drawn by bar number so nights and weekends don't leave flat gaps.
-function plotPrice(s, base, rng, tz, baseIsPrevClose) {
+// sess (1D only): per-point session code, "p" pre-market / "r" regular / "a" after hours.
+function plotPrice(s, base, rng, tz, baseIsPrevClose, sess = null) {
   const d = state.data, i = d.info, intraday = !!tz;
-  const ch = s[s.length - 1][1] / base - 1;
+  if (sess && !sess.some((c) => c !== "r")) sess = null;
+  const lastReg = sess ? sess.lastIndexOf("r") : s.length - 1;
+  // Outside regular hours the official close (incl. the closing auction) can differ a little from the
+  // last 2-minute bar; use it so the chart matches the header.
+  const close = sess && i.marketState !== "REGULAR" ? i.regularMarketPrice : null;
+  if (close && lastReg < 0) base = close;   // pre-market: vs. yesterday's official close
+  else if (sess && lastReg >= 0 && i.previousClose) base = i.previousClose;   // same official close as the header
+  // headline change uses the regular session (like the header); extended trading is reported beside it
+  const ref = lastReg >= 0 ? close || s[lastReg][1] : s[s.length - 1][1];
+  const ch = ref / base - 1;
   const col = ch >= 0 ? css("--good") : css("--bad");
-  const when = rng === "YTD" ? "this year" : rng === "Max" ? "since " + new Date(s[0][0]).getFullYear()
+  let when = rng === "YTD" ? "this year" : rng === "Max" ? "since " + new Date(s[0][0]).getFullYear()
     : rng === "1D" ? (baseIsPrevClose ? "since the previous close" : "today") : "over " + rng;
-  $("#perf").innerHTML = `<span class="${ch >= 0 ? "up" : "down"}" style="font-weight:700">${signed(ch)}</span> ${when}`;
+  if (sess && lastReg < 0) when = "pre-market, vs. the previous close";
+  let extra = "";
+  if (sess && lastReg >= 0 && lastReg < s.length - 1) {
+    const ext = s[s.length - 1][1] / ref - 1;
+    extra = ` · after hours <span class="${ext >= 0 ? "up" : "down"}" style="font-weight:700">${signed(ext, 2)}</span>`;
+  }
+  $("#perf").innerHTML = `<span class="${ch >= 0 ? "up" : "down"}" style="font-weight:700">${signed(ch, rng === "1D" ? 2 : 1)}</span> ${when}${extra}`;
   const old = state.charts.find((c) => c.canvas.id === "cPrice");
   if (old) { old.destroy(); state.charts = state.charts.filter((c) => c !== old); }
 
@@ -444,6 +496,7 @@ function plotPrice(s, base, rng, tz, baseIsPrevClose) {
   const fmt = (t, o) => new Date(t).toLocaleString(undefined, { ...o, ...tzOpt });
   const xy = s.map((p, k) => ({ x: intraday ? k : p[0], y: p[1] }));
   const datasets = [{ data: xy, borderColor: col, borderWidth: 2, pointRadius: 0, fill: true, tension: intraday ? 0 : 0.15,
+    segment: sess ? { borderColor: (c) => (sess[c.p1DataIndex] !== "r" ? col + "88" : undefined) } : undefined,
     backgroundColor: (ctx) => { const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height); g.addColorStop(0, col + "33"); g.addColorStop(1, col + "00"); return g; } }];
   if (rng === "1D" && baseIsPrevClose) {
     datasets.push({ label: "Previous close", data: [{ x: 0, y: base }, { x: s.length - 1, y: base }], borderColor: css("--ink-3"),
@@ -453,10 +506,12 @@ function plotPrice(s, base, rng, tz, baseIsPrevClose) {
   mk("cPrice", {
     type: "line",
     data: { datasets },
+    plugins: [sessionBands],
     options: baseOpts({
-      plugins: { ...baseOpts().plugins, legend: { display: false },
+      plugins: { ...baseOpts().plugins, legend: { display: false }, sessionBands: { sessions: sess },
         tooltip: { ...baseOpts().plugins.tooltip, filter: (it) => it.datasetIndex === 0,
-          callbacks: { title: (it) => fmt(timeOf(it[0].parsed.x), tipFmt), label: (it) => priceIn(it.parsed.y, i) } } },
+          callbacks: { title: (it) => fmt(timeOf(it[0].parsed.x), tipFmt),
+            label: (it) => priceIn(it.parsed.y, i) + (sess && SESSION_NAME[sess[it.dataIndex]] ? " · " + SESSION_NAME[sess[it.dataIndex]] : "") } } },
       scales: {
         x: { type: "linear", min: minX, max: maxX, grid: { display: false },
           ticks: { maxTicksLimit: rng === "1W" ? 5 : 7, callback: (v) => fmt(timeOf(v), tickFmt) } },
