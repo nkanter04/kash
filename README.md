@@ -6,6 +6,8 @@ plus an 8-point scorecard and a "story in charts" overview that answers the ques
 actually asks: is it growing, is it profitable, does it make real cash, is it financially healthy,
 and is the price right?
 
+![Home page: index levels and S&P 500 heat map](docs/home.jpg)
+
 ![Scorecard](docs/scorecard.jpg)
 
 | The story in charts | Full financial statements |
@@ -14,6 +16,8 @@ and is the price right?
 
 ## Features
 
+- **Market home page:** S&P 500, Nasdaq, Dow and Russell 2000 levels with today's move, and a heat map
+  of the S&P 500, Nasdaq-100 or Dow 30 (box size = market value, color = today's change, grouped by sector).
 - **8-point scorecard**: growing sales, profitable, generates cash, uses capital well (ROIC),
   solid balance sheet, fairly priced vs. its own P/E history, rewards shareholders, analysts see upside.
   Each check comes with a one-sentence explanation.
@@ -69,9 +73,11 @@ historical P/E is in a sensible range.
   and split normalization. Downloads are cached in `.cache/`.
 - `company.py`: company details for the Forecast, Fair value, Ownership, Dividends and Company tabs
   (`/api/company/{ticker}`), plus recent SEC filings from `sec.py`.
+- `market.py`: home page data (`/api/market/summary`, `/api/market/heatmap/{index}`): index members from
+  Wikipedia and Nasdaq, market caps and daily moves from Yahoo's screener.
 - `rows.py`: every statement and ratio line, with its label, data source or formula, and plain-English
   description.
-- `static/`: the single-page frontend (vanilla JS and Chart.js); `company.js` holds the company tabs.
+- `static/`: the single-page frontend (vanilla JS and Chart.js); `company.js` holds the company tabs and `market.js` the home page.
 
 ## Data and limitations
 

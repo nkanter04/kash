@@ -47,7 +47,11 @@ function count(v) {
   return v.toLocaleString();
 }
 const pct = (v, d = 1) => (v == null ? "–" : (v * 100).toFixed(d) + "%");
-const signed = (v, d = 1) => (v == null ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(d) + "%");
+const signed = (v, d = 1) => {   // "+1.2%" / "-0.4%"; values that round to zero show as "0.0%", never "-0.0%"
+  if (v == null) return "–";
+  const r = +(v * 100).toFixed(d);
+  return (r > 0 ? "+" : "") + (r === 0 ? 0 : r).toFixed(d) + "%";
+};
 const price = (v) => (v == null ? "–" : sym() + v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + tail());
 const mult = (v) => (v == null ? "–" : v.toFixed(1) + "×");
 function fmt(v, f) {
@@ -116,23 +120,7 @@ function pick(sym) { sug.hidden = true; q.value = ""; q.blur(); go("/stock/" + e
 /* ------------------------------------------------------------ home */
 const POPULAR = [["AAPL", "Apple"], ["MSFT", "Microsoft"], ["NVDA", "Nvidia"], ["ACN", "Accenture"], ["KO", "Coca-Cola"],
   ["AMZN", "Amazon"], ["XOM", "Exxon Mobil"], ["COST", "Costco"], ["JPM", "JPMorgan"], ["TSLA", "Tesla"]];
-function renderHome() {
-  destroyCharts();
-  state.data = null;
-  document.title = "Kash";
-  app.innerHTML = `
-    <div class="hero">
-      <h1>Understand any stock<br><em>in plain English.</em></h1>
-      <p>Real financial statements, explained. See if a company is growing, profitable, healthy and fairly priced, at a glance.</p>
-      <div class="chips">${POPULAR.map(([s, n]) => `<a class="chip" href="/stock/${s}" data-link>${s} <small>${n}</small></a>`).join("")}</div>
-    </div>
-    <div class="grid g3 features">
-      ${feature("✅", "A simple scorecard", "Eight yes-or-no checks tell you the story before you read a single number.")}
-      ${feature("📈", "The story in charts", "Revenue, profit, margins, cash flow and debt, drawn so trends jump out.")}
-      ${feature("📒", "Full financials", "Income statement, balance sheet, cash flow and ratios, with every line explained.")}
-    </div>`;
-}
-const feature = (e, t, s) => `<div class="card feature"><div class="q-emoji">${e}</div><h3>${t}</h3><p class="sub" style="margin:0">${s}</p></div>`;
+// renderHome() lives in market.js
 
 /* ------------------------------------------------------------ stock page */
 async function loadStock(ticker) {
@@ -637,4 +625,4 @@ document.addEventListener("mouseover", (e) => {
 });
 window.addEventListener("scroll", () => { if (tipEl) tipEl.hidden = true; }, { passive: true });
 
-route();
+// route() is called from index.html once app.js, company.js and market.js have all loaded

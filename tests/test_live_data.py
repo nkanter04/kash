@@ -153,3 +153,19 @@ def test_no_ttm_column_duplicating_the_latest_fiscal_year(stocks, ticker):
     if cols[0] == "TTM":
         rev = app.series_of(fin["income"], "revenue")
         assert rev[0] != rev[1], f"TTM repeats {cols[1]}"
+
+
+@pytest.mark.parametrize("index,expected", [("sp500", 500), ("ndx", 100), ("dow", 30)])
+def test_heatmap_covers_the_index(index, expected):
+    import market
+    d = market.heatmap(index)
+    n = sum(len(s["items"]) for s in d["sectors"])
+    assert n >= expected * 0.97, d["missing"]
+    assert all(-0.5 < i["change"] < 0.5 for s in d["sectors"] for i in s["items"] if i["change"] is not None)
+
+
+def test_index_summary():
+    import market
+    rows = market.summary()
+    assert [r["label"] for r in rows] == ["S&P 500", "Nasdaq", "Dow Jones", "Russell 2000"]
+    assert all(r["price"] > 0 and len(r["spark"]) >= 15 for r in rows)

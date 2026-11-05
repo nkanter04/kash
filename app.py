@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import company
+import market
 import sec
 from rows import BALANCE_ROWS, CASHFLOW_ROWS, INCOME_ROWS, RATIO_ROWS
 
@@ -675,6 +676,26 @@ def company_info(ticker: str):
     with _lock:
         _company[ticker] = (time.time(), data)
     return data
+
+
+@app.get("/api/market/summary")
+def market_summary():
+    """Major index levels (S&P 500, Nasdaq, Dow, Russell 2000) with today's change."""
+    try:
+        return market.summary()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not load index levels: {e}")
+
+
+@app.get("/api/market/heatmap/{index}")
+def market_heatmap(index: str):
+    """Index members grouped by sector with market cap and today's % change (index: sp500, ndx, dow)."""
+    if index not in market.INDEXES:
+        raise HTTPException(404, f"Unknown index '{index}'. Use one of {', '.join(market.INDEXES)}.")
+    try:
+        return market.heatmap(index)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not load the heat map: {e}")
 
 
 @app.get("/api/search")

@@ -24,6 +24,7 @@
   --radius: 6px;
   --font: "IBM Plex Sans", system-ui, sans-serif;
   --on-status: #ffffff;
+  --hm-zero: #e6e1d5;
   --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
   color-scheme: light;
 }
@@ -33,7 +34,7 @@
     --line: #2a3038; --soft: #20262d; --brand: #348262; --brand-ink: #6cc39c; --brand-soft: #1b3128;
     --good: #4fc282; --good-soft: #163324; --bad: #f2756c; --bad-soft: #3b1e1c; --warn: #e2aa3e;
     --c1: #5fb38e; --c2: #7fa9db; --c3: #e3b452; --c4: #d77ea2;
-    --shadow: 0 1px 0 rgba(0, 0, 0, .25); --on-status: #11151a; color-scheme: dark;
+    --shadow: 0 1px 0 rgba(0, 0, 0, .25); --on-status: #11151a; --hm-zero: #2b3139; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
@@ -41,7 +42,7 @@
   --line: #2a3038; --soft: #20262d; --brand: #348262; --brand-ink: #6cc39c; --brand-soft: #1b3128;
   --good: #4fc282; --good-soft: #163324; --bad: #f2756c; --bad-soft: #3b1e1c; --warn: #e2aa3e;
   --c1: #5fb38e; --c2: #7fa9db; --c3: #e3b452; --c4: #d77ea2;
-  --shadow: 0 1px 0 rgba(0, 0, 0, .25); --on-status: #11151a; color-scheme: dark;
+  --shadow: 0 1px 0 rgba(0, 0, 0, .25); --on-status: #11151a; --hm-zero: #2b3139; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -95,17 +96,11 @@ h3 { font-size: 17px; margin: 0 0 2px; }
   background: var(--brand-soft); font-size: 17px; flex: none; }
 
 /* ---------- home */
-.hero { text-align: center; padding: 72px 0 40px; }
-.hero h1 { font-size: clamp(32px, 5vw, 52px); line-height: 1.1; letter-spacing: -.03em; margin: 0 0 14px; }
-.hero h1 em { font-style: normal; color: var(--brand); }
-.hero p { color: var(--ink-2); font-size: 18px; max-width: 560px; margin: 0 auto 28px; }
 .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 .chip { display: inline-flex; gap: 8px; align-items: center; padding: 10px 16px; border-radius: 999px;
   border: 1px solid var(--line); background: var(--card); color: var(--ink); font-weight: 600; cursor: pointer; }
 .chip:hover { border-color: var(--brand); }
 .chip small { color: var(--ink-3); font-weight: 500; }
-.features { margin-top: 56px; }
-.feature .q-emoji { margin-bottom: 10px; }
 
 /* ---------- stock header */
 .head { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; justify-content: space-between; }
@@ -263,14 +258,13 @@ table.plain td { vertical-align: top; }
 /* ---------- Ledger theme details (serif display type, tight corners, brand-ink text) */
 /* typography: serif display, sans body with tabular figures */
 body { font-variant-numeric: tabular-nums; }
-h1, h2, h3, .brand, .hero h1, .ident h1, .fv-big, .price .big {
+h1, h2, h3, .brand, .ident h1, .fv-big, .price .big {
   font-family: var(--serif);
   font-optical-sizing: auto;
 }
-h1, h2, .hero h1, .ident h1 { font-weight: 600; letter-spacing: -.01em; }
+h1, h2, .ident h1 { font-weight: 600; letter-spacing: -.01em; }
 h3 { font-weight: 600; }
 .brand { font-weight: 700; letter-spacing: -.005em; }
-.hero h1 em { font-style: italic; font-weight: 500; }
 .price .big, .fv-big { font-weight: 600; letter-spacing: -.01em; }
 .stat .k, .pill .k, th { letter-spacing: .02em; }
 
@@ -294,5 +288,33 @@ th { border-bottom: 1px solid var(--ink-3); }
 
 /* Brand-colored text uses --brand-ink: same as --brand in light mode, a lighter green in dark mode so it
    stays readable on dark cards (--brand itself is kept dark enough for white text on it). */
-a, .tab.on, .seg button.on, .tbar .mk.now, .hero h1 em, .news a:hover .t, .logo { color: var(--brand-ink); }
+a, .tab.on, .seg button.on, .tbar .mk.now, .news a:hover .t, .logo { color: var(--brand-ink); }
 .check .ic { color: var(--on-status); }
+
+/* ---------- home: indexes and heat map (market.js) */
+.home-head h1 { font-size: 34px; margin: 28px 0 0; }
+.home-head .sub { margin: 2px 0 0; }
+.idx-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+@media (max-width: 860px) { .idx-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.idx-card { display: block; padding: 14px 16px 10px; color: var(--ink); min-height: 118px; }
+a.idx-card:hover { border-color: var(--brand); }
+.idx-card .k { font-size: 13px; color: var(--ink-3); letter-spacing: .02em; }
+.idx-card .v { font-size: 22px; font-weight: 700; }
+.idx-spark { display: block; width: 100%; height: 36px; margin-top: 6px; }
+.skeleton { background: var(--soft); border-color: transparent; }
+.heatmap { position: relative; margin-top: 14px; border-radius: var(--radius); overflow: hidden; background: var(--card); min-height: 200px; }
+.hm-sector { position: absolute; box-shadow: inset 0 0 0 1px var(--card); }
+.hm-sector .hd { position: absolute; left: 0; right: 0; top: 0; height: 18px; padding: 1px 6px; font-size: 11px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); background: var(--card);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+  overflow: hidden; text-align: center; line-height: 1.05; text-decoration: none; box-shadow: inset 0 0 0 1px var(--card); }
+.tile:hover { box-shadow: inset 0 0 0 2px var(--ink); z-index: 1; }
+.tile b { font-weight: 700; }
+.tile span { font-weight: 600; opacity: .92; }
+.hm-legend { display: flex; justify-content: center; margin-top: 12px; }
+.hm-legend span { width: 52px; padding: 3px 0; text-align: center; font-size: 12px; font-weight: 600; }
+.hm-legend span:first-child { border-radius: 4px 0 0 4px; } .hm-legend span:last-child { border-radius: 0 4px 4px 0; }
+.chips.left { justify-content: flex-start; }
+.tip { white-space: pre-line; }
+

@@ -1,7 +1,8 @@
 # Kash: notes for Claude
 
-Friendly stock analysis web app: FastAPI backend (`app.py`, `sec.py`, `rows.py`, `company.py`) and a vanilla JS
-single-page frontend (`static/app.js`; the company tabs are in `static/company.js`). Public repo: github.com/nkanter04/kash. See README.md for features.
+Friendly stock analysis web app: FastAPI backend (`app.py`, `sec.py`, `rows.py`, `company.py`, `market.py`) and a vanilla JS
+single-page frontend (`static/app.js`; company tabs in `static/company.js`, home page in `static/market.js`;
+`index.html` calls `route()` after all three scripts load). Public repo: github.com/nkanter04/kash. See README.md for features.
 
 ## Run and test
 
@@ -56,6 +57,10 @@ single-page frontend (`static/app.js`; the company tabs are in `static/company.j
   by `share_ratio` (statement shares per quoted share: TSM 5, BHP 2, BRK-B ~1/1500). The ratio needs
   `impliedSharesOutstanding` (all share classes); `sharesOutstanding` counts only one class (GOOGL, NVO).
   The live test `test_price_ratios_match_yahoo_across_listing_types` guards this.
+- Home page (`market.py`, `market.js`): index members come from Wikipedia (S&P 500, Dow 30, GICS sectors) and
+  Nasdaq's list API (Nasdaq-100), cached a week in `.cache/members_*.json` with a stale-copy fallback; market cap
+  and % change come from one paged Yahoo screener pull (US stocks > $1B, ~6 s, cached 2 min). The screener's
+  `regularMarketChangePercent` is in percent. The heat map is a squarified treemap drawn as positioned `<a>` tiles.
 - JS `cagr()` takes `[{v}, ...]` objects (as returned by `annualSeries`), not plain numbers.
 - Theme ("Ledger"): all colors are tokens at the top of `styles.css`, redefined for dark mode. Use `--brand` for
   fills with white text, `--brand-ink` for green *text* (lighter in dark mode), `--on-status` for text on
