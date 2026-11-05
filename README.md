@@ -1,4 +1,4 @@
-# Stockwise
+# Kash
 
 A friendly stock analysis tool. It shows full financial statements (income statement, balance sheet,
 cash flow and ratios, annual and quarterly, with TTM) with a plain-English explanation on every line,
@@ -21,11 +21,11 @@ and is the price right?
 - **Split-consistent history**: SEC share counts and EPS are restated to today's share basis, so P/E and
   per-share history stay correct across stock splits.
 - **Hover explanations** on every statement line and ratio, sparklines for each row, and CSV export.
-- Price chart from 1 month to the full listing history, P/E history, analyst targets, and dark mode.
+- Price chart from 1 day (with pre-market and after-hours trading) to the full listing history, P/E history, analyst targets, and dark mode.
 
 ## Run
 
-On Windows, double-click `start-stockwise.bat`. It sets up the environment on first run, starts the
+On Windows, double-click `start-kash.bat`. It sets up the environment on first run, starts the
 server and opens http://localhost:8050. Close its window to stop. Or manually:
 
 ```bash
@@ -76,7 +76,7 @@ historical P/E is in a sensible range.
 
 ## Disclaimer
 
-Stockwise is a personal learning project. The data may be delayed, incomplete or wrong, and the scorecard
+Kash is a personal learning project. The data may be delayed, incomplete or wrong, and the scorecard
 is a set of simple rules of thumb. **Nothing here is investment advice.** Do your own research before
 making any investment decision.
 

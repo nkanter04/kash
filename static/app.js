@@ -1,4 +1,4 @@
-/* Stockwise frontend: plain JS + Chart.js. */
+/* Kash frontend: plain JS + Chart.js. */
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
 const state = { data: null, tab: "overview", stmt: "income", period: "annual", range: "1Y", charts: [] };
@@ -119,7 +119,7 @@ const POPULAR = [["AAPL", "Apple"], ["MSFT", "Microsoft"], ["NVDA", "Nvidia"], [
 function renderHome() {
   destroyCharts();
   state.data = null;
-  document.title = "Stockwise";
+  document.title = "Kash";
   app.innerHTML = `
     <div class="hero">
       <h1>Understand any stock<br><em>in plain English.</em></h1>
@@ -159,7 +159,7 @@ function renderStock() {
   destroyCharts();
   const d = state.data, i = d.info;
   CUR = i.financialCurrency || i.currency || "USD";
-  document.title = `${d.ticker} · ${i.shortName || i.longName || ""} · Stockwise`;
+  document.title = `${d.ticker} · ${i.shortName || i.longName || ""} · Kash`;
   const chg = i.regularMarketChange, chgp = i.regularMarketChangePercent;
   const cls = chg >= 0 ? "up" : "down";
   const lo = i.fiftyTwoWeekLow, hi = i.fiftyTwoWeekHigh, px = i.currentPrice;

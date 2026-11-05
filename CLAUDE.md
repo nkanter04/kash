@@ -1,12 +1,12 @@
-# Stockwise: notes for Claude
+# Kash: notes for Claude
 
 Friendly stock analysis web app: FastAPI backend (`app.py`, `sec.py`, `rows.py`) and a vanilla JS
-single-page frontend (`static/`). Public repo: github.com/nkanter04/stockwise. See README.md for features.
+single-page frontend (`static/`). Public repo: github.com/nkanter04/kash. See README.md for features.
 
 ## Run and test
 
-- Server: `.venv/Scripts/python -m uvicorn app:app --port 8050 --reload` (or `start-stockwise.bat`, or the
-  `stockwise` entry in `.claude/launch.json`). `--reload` restarts on .py changes; static files are served
+- Server: `.venv/Scripts/python -m uvicorn app:app --port 8050 --reload` (or `start-kash.bat`, or the
+  `kash` entry in `.claude/launch.json`). `--reload` restarts on .py changes; static files are served
   fresh, so a browser refresh is enough for frontend edits.
 - Tests: `.venv/Scripts/python -m pytest` runs everything (~20 s).
   `-m "not network"` runs only the offline unit tests (~5 s); `-m network` runs only the live-data checks.
