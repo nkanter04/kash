@@ -38,6 +38,9 @@ single-page frontend (`static/`). Public repo: github.com/nkanter04/stockwise. S
   with up to 10 years. Ratio tables start with a "Current" column.
 - Every statement/ratio row in `rows.py` needs a plain-English `desc`: the friendly explanations are the
   point of the app.
+- Price chart: 1D/1W/1M come from `/api/prices/{ticker}?range=` (intraday 2m/5m/30m bars, cached 60 s) and
+  are plotted by bar number so nights and weekends leave no flat gaps; 1D change is vs the prior session's
+  close. 6M and longer use the daily series from `/api/stock` (weekly before the last 10 years).
 - Frontend charts: Chart.js 4.4.1. Wait for the web font before drawing (Chart.js caches label widths).
 - The SEC requires a contact email in the User-Agent: `config.json` (gitignored; template in
   `config.example.json`) or `SEC_USER_AGENT`. Never commit `config.json` or put an email in code.

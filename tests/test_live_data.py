@@ -3,6 +3,7 @@
 Slow (downloads data) and need internet plus an SEC contact email in config.json.
 Run with:  pytest -m network
 """
+import pandas as pd
 import pytest
 import yfinance as yf
 
@@ -92,3 +93,15 @@ def test_foreign_filer_falls_back_to_yahoo(stocks):
     fin = stocks("TSM")["financials"]["annual"]
     assert fin["source"] == "Yahoo Finance"
     assert len(by_year(fin, "income", "revenue")) >= 3
+
+
+@pytest.mark.parametrize("rng,min_points", [("1D", 50), ("1W", 200), ("1M", 150)])
+def test_intraday_prices_are_dense(rng, min_points):
+    d = app.intraday("AAPL", rng)
+    assert len(d["points"]) >= min_points
+    times = [t for t, _ in d["points"]]
+    assert times == sorted(times)
+    if rng == "1D":
+        assert d["baseIsPrevClose"]           # 1D change is measured from the prior session's close
+        days = {pd.Timestamp(t, unit="ms").tz_localize("UTC").tz_convert(d["tz"]).date() for t in times}
+        assert len(days) == 1                 # only the latest session

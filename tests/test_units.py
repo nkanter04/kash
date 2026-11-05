@@ -189,3 +189,9 @@ def test_scorecard_skips_pillars_without_data():
     fin = _fin([100] * 6, roic=[None] * 5, fcf=[1] * 6, shares=[1] * 6, pe=[20] * 10)
     keys = [c["key"] for c in app.scorecard(fin, INFO)]
     assert "roic" not in keys and len(keys) == 7
+
+
+def test_intraday_rejects_unknown_range():
+    with pytest.raises(app.HTTPException) as e:
+        app.intraday("AAPL", "5Y")
+    assert e.value.status_code == 400

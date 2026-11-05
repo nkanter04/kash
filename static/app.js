@@ -239,7 +239,7 @@ function renderOverview() {
       <div class="card">
         <div class="row-between">
           <div class="q-title"><div class="q-emoji">📈</div><div><h3>How has the stock done?</h3><div class="muted" id="perf"></div></div></div>
-          <div class="seg" id="ranges">${["1M", "6M", "YTD", "1Y", "5Y", "10Y", "Max"].map((r) => `<button data-r="${r}" class="${r === state.range ? "on" : ""}">${r}</button>`).join("")}</div>
+          <div class="seg" id="ranges">${["1D", "1W", "1M", "6M", "YTD", "1Y", "5Y", "10Y", "Max"].map((r) => `<button data-r="${r}" class="${r === state.range ? "on" : ""}">${r}</button>`).join("")}</div>
         </div>
         <div class="chart-box tall" style="margin-top:14px"><canvas id="cPrice"></canvas></div>
       </div>
@@ -393,30 +393,73 @@ function baseOpts(extra = {}) {
 function mk(id, cfg) { const el = document.getElementById(id); if (!el) return; state.charts.push(new Chart(el, cfg)); }
 const bar = (label, data, color, extra = {}) => ({ type: "bar", label, data, backgroundColor: color, borderRadius: 6, maxBarThickness: 38, ...extra });
 
-function drawPrice() {
-  const d = state.data, pts = d.prices; if (!pts.length) return;
+const INTRADAY = ["1D", "1W", "1M"];
+const intradayCache = {};   // "AAPL|1D" -> { at, data }
+
+async function drawPrice() {
+  const d = state.data, rng = state.range;
+  if (INTRADAY.includes(rng)) {
+    const key = d.ticker + "|" + rng, hit = intradayCache[key];
+    let data = hit && Date.now() - hit.at < 60e3 ? hit.data : null;
+    if (!data) {
+      $("#perf").textContent = "Loading…";
+      try {
+        const r = await fetch(`/api/prices/${encodeURIComponent(d.ticker)}?range=${rng}`);
+        if (!r.ok) throw new Error();
+        data = await r.json();
+        intradayCache[key] = { at: Date.now(), data };
+      } catch { data = null; }
+      if (state.range !== rng || state.data !== d) return;   // user moved on while loading
+    }
+    if (data && data.points.length > 1) return plotPrice(data.points, data.base, rng, data.tz, data.baseIsPrevClose);
+    $("#perf").textContent = "Intraday prices aren't available; showing daily closes.";
+  }
+  const pts = d.prices; if (!pts.length) return;
   const now = pts[pts.length - 1][0], day = 864e5;
-  const spans = { "1M": 31, "6M": 183, "1Y": 366, "5Y": 1827, "10Y": 3660 };
-  let start = state.range === "YTD" ? Date.UTC(new Date(now).getUTCFullYear(), 0, 1)
-    : state.range === "Max" ? pts[0][0] : now - spans[state.range] * day;
+  const spans = { "1D": 7, "1W": 7, "1M": 31, "6M": 183, "1Y": 366, "5Y": 1827, "10Y": 3660 };
+  const start = rng === "YTD" ? Date.UTC(new Date(now).getUTCFullYear(), 0, 1)
+    : rng === "Max" ? pts[0][0] : now - spans[rng] * day;
   const s = pts.filter((p) => p[0] >= start);
-  const ch = s[s.length - 1][1] / s[0][1] - 1;
+  plotPrice(s, s[0][1], rng, null, false);
+}
+
+// Intraday ranges (tz set) are drawn by bar number so nights and weekends don't leave flat gaps.
+function plotPrice(s, base, rng, tz, baseIsPrevClose) {
+  const d = state.data, i = d.info, intraday = !!tz;
+  const ch = s[s.length - 1][1] / base - 1;
   const col = ch >= 0 ? css("--good") : css("--bad");
-  $("#perf").innerHTML = `<span class="${ch >= 0 ? "up" : "down"}" style="font-weight:700">${signed(ch)}</span> ${state.range === "YTD" ? "this year" : state.range === "Max" ? "since " + new Date(s[0][0]).getFullYear() : "over " + state.range}`;
+  const when = rng === "YTD" ? "this year" : rng === "Max" ? "since " + new Date(s[0][0]).getFullYear()
+    : rng === "1D" ? (baseIsPrevClose ? "since the previous close" : "today") : "over " + rng;
+  $("#perf").innerHTML = `<span class="${ch >= 0 ? "up" : "down"}" style="font-weight:700">${signed(ch)}</span> ${when}`;
   const old = state.charts.find((c) => c.canvas.id === "cPrice");
   if (old) { old.destroy(); state.charts = state.charts.filter((c) => c !== old); }
-  const long = ["5Y", "10Y", "Max"].includes(state.range);
-  const fmtD = (t) => new Date(t).toLocaleDateString(undefined, long ? { month: "short", year: "numeric" } : { month: "short", day: "numeric" });
-  const i = d.info;
+
+  const long = ["5Y", "10Y", "Max"].includes(rng);
+  const tzOpt = tz ? { timeZone: tz } : {};
+  const tickFmt = rng === "1D" ? { hour: "numeric", minute: "2-digit" }
+    : rng === "1W" ? { weekday: "short", month: "short", day: "numeric" }
+    : long ? { month: "short", year: "numeric" } : { month: "short", day: "numeric" };
+  const tipFmt = intraday ? { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" } : { dateStyle: "medium" };
+  const timeOf = (x) => intraday ? s[Math.max(0, Math.min(s.length - 1, Math.round(x)))][0] : x;
+  const fmt = (t, o) => new Date(t).toLocaleString(undefined, { ...o, ...tzOpt });
+  const xy = s.map((p, k) => ({ x: intraday ? k : p[0], y: p[1] }));
+  const datasets = [{ data: xy, borderColor: col, borderWidth: 2, pointRadius: 0, fill: true, tension: intraday ? 0 : 0.15,
+    backgroundColor: (ctx) => { const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height); g.addColorStop(0, col + "33"); g.addColorStop(1, col + "00"); return g; } }];
+  if (rng === "1D" && baseIsPrevClose) {
+    datasets.push({ label: "Previous close", data: [{ x: 0, y: base }, { x: s.length - 1, y: base }], borderColor: css("--ink-3"),
+      borderWidth: 1, borderDash: [4, 4], pointRadius: 0, fill: false });
+  }
+  const minX = xy[0].x, maxX = xy[xy.length - 1].x;
   mk("cPrice", {
     type: "line",
-    data: { datasets: [{ data: s.map((p) => ({ x: p[0], y: p[1] })), borderColor: col, borderWidth: 2, pointRadius: 0, fill: true, tension: 0.15,
-      backgroundColor: (ctx) => { const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height); g.addColorStop(0, col + "33"); g.addColorStop(1, col + "00"); return g; } }] },
+    data: { datasets },
     options: baseOpts({
       plugins: { ...baseOpts().plugins, legend: { display: false },
-        tooltip: { ...baseOpts().plugins.tooltip, callbacks: { title: (it) => new Date(it[0].parsed.x).toLocaleDateString(undefined, { dateStyle: "medium" }), label: (it) => priceIn(it.parsed.y, i) } } },
+        tooltip: { ...baseOpts().plugins.tooltip, filter: (it) => it.datasetIndex === 0,
+          callbacks: { title: (it) => fmt(timeOf(it[0].parsed.x), tipFmt), label: (it) => priceIn(it.parsed.y, i) } } },
       scales: {
-        x: { type: "linear", min: s[0][0], max: now, grid: { display: false }, ticks: { maxTicksLimit: 7, callback: fmtD } },
+        x: { type: "linear", min: minX, max: maxX, grid: { display: false },
+          ticks: { maxTicksLimit: rng === "1W" ? 5 : 7, callback: (v) => fmt(timeOf(v), tickFmt) } },
         y: { grid: { color: css("--line") }, border: { display: false }, ticks: { callback: (v) => priceIn(v, i).replace(/\.00/, "") } },
       },
     }),

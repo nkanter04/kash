@@ -490,6 +490,54 @@ def stock(ticker: str):
     return load(ticker)
 
 
+# short ranges use intraday bars: (yfinance period, interval)
+INTRADAY = {"1D": ("5d", "2m"), "1W": ("5d", "5m"), "1M": ("1mo", "30m")}
+INTRADAY_SECONDS = 60
+_intraday: dict[tuple[str, str], tuple[float, dict]] = {}
+
+
+def intraday(ticker: str, rng: str) -> dict:
+    """Intraday closes for a short range. 1D = the latest session, measured from the prior session's close."""
+    ticker, rng = ticker.upper().strip(), rng.upper()
+    if rng not in INTRADAY:
+        raise HTTPException(400, f"Unknown range '{rng}'. Use one of {', '.join(INTRADAY)}.")
+    key = (ticker, rng)
+    with _lock:
+        hit = _intraday.get(key)
+        if hit and time.time() - hit[0] < INTRADAY_SECONDS:
+            return hit[1]
+    period, interval = INTRADAY[rng]
+    try:
+        hist = yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=False)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not reach Yahoo Finance: {e}")
+    closes = hist["Close"].dropna() if not hist.empty else pd.Series(dtype=float)
+    if closes.empty:
+        raise HTTPException(404, f"No intraday prices for '{ticker}'.")
+    base = None
+    if rng == "1D":
+        days = closes.index.normalize()
+        last = closes[days == days[-1]]
+        before = closes[days < days[-1]]
+        base = clean(before.iloc[-1]) if len(before) else None
+        closes = last
+    data = {
+        "range": rng,
+        "tz": str(closes.index.tz) if closes.index.tz is not None else "UTC",
+        "points": [[int(ts.timestamp() * 1000), round(float(v), 4)] for ts, v in closes.items()],
+        "base": base if base is not None else round(float(closes.iloc[0]), 4),
+        "baseIsPrevClose": base is not None,
+    }
+    with _lock:
+        _intraday[key] = (time.time(), data)
+    return data
+
+
+@app.get("/api/prices/{ticker}")
+def prices(ticker: str, range: str):  # noqa: A002  (query parameter name)
+    return intraday(ticker, range)
+
+
 @app.get("/api/search")
 def search(q: str):
     q = q.strip()
