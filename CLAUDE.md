@@ -57,6 +57,10 @@ single-page frontend (`static/app.js`; the company tabs are in `static/company.j
   `impliedSharesOutstanding` (all share classes); `sharesOutstanding` counts only one class (GOOGL, NVO).
   The live test `test_price_ratios_match_yahoo_across_listing_types` guards this.
 - JS `cagr()` takes `[{v}, ...]` objects (as returned by `annualSeries`), not plain numbers.
+- Theme ("Ledger"): all colors are tokens at the top of `styles.css`, redefined for dark mode. Use `--brand` for
+  fills with white text, `--brand-ink` for green *text* (lighter in dark mode), `--on-status` for text on
+  --good/--bad fills, `--font` (IBM Plex Sans; charts and the gauge read it) and `--serif` (Source Serif 4,
+  headings). Never hard-code a font or color in JS; read tokens with `css("--name")`.
 - Frontend charts: Chart.js 4.4.1. Wait for the web font before drawing (Chart.js caches label widths).
 - The SEC requires a contact email in the User-Agent: `config.json` (gitignored; template in
   `config.example.json`) or `SEC_USER_AGENT`. Never commit `config.json` or put an email in code.

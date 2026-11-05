@@ -143,3 +143,13 @@ def test_price_ratios_match_yahoo_across_listing_types(stocks, ticker):
     yahoo = d["info"]["trailingPE"]
     assert pe[0] == pytest.approx(yahoo, rel=0.15)
     assert all(3 < v < 120 for v in pe[1:] if v is not None)
+
+
+@pytest.mark.parametrize("ticker", ["AAPL", "ACN", "KO"])
+def test_no_ttm_column_duplicating_the_latest_fiscal_year(stocks, ticker):
+    """Yahoo dates quarters by calendar month-end (Sep 30) while SEC uses the real FY end (Sep 26)."""
+    fin = stocks(ticker)["financials"]["annual"]
+    cols = [c["label"] for c in fin["columns"]["income"]]
+    if cols[0] == "TTM":
+        rev = app.series_of(fin["income"], "revenue")
+        assert rev[0] != rev[1], f"TTM repeats {cols[1]}"

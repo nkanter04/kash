@@ -270,7 +270,7 @@ def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_fra
         qinc, qcf = t.quarterly_income_stmt, t.quarterly_cashflow
         inc_ttm, cf_ttm = ttm_frame(qinc), ttm_frame(qcf)
         # if the latest quarter IS the fiscal year end, TTM just duplicates the FY column
-        if qinc is not None and not qinc.empty and inc is not None and not inc.empty                 and qinc.columns[0] <= inc.columns.max():
+        if qinc is not None and not qinc.empty and inc is not None and not inc.empty                 and qinc.columns[0] <= inc.columns.max() + pd.Timedelta(days=20):   # Yahoo vs SEC dates differ by days
             inc_ttm = cf_ttm = None
     else:
         inc, bal, cf = t.quarterly_income_stmt, t.quarterly_balance_sheet, t.quarterly_cashflow

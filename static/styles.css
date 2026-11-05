@@ -1,48 +1,54 @@
+/* Kash theme: "Ledger" (editorial, annual-report feel). Warm paper, ink-navy text, forest-green accent,
+   Source Serif 4 headings over IBM Plex Sans. Colors are tokens; dark mode redefines them. */
 :root {
-  --bg: #f6f5f1;
-  --card: #ffffff;
-  --ink: #1d2433;
-  --ink-2: #4b5468;
-  --ink-3: #8a91a2;
-  --line: #e7e5df;
-  --soft: #f1efe9;
-  --brand: #4f46e5;
-  --brand-soft: #eceafd;
-  --good: #12a150;
-  --good-soft: #e3f6ea;
-  --bad: #e5484d;
-  --bad-soft: #fdeaea;
-  --warn: #e8a317;
-  --c1: #4f46e5;
-  --c2: #14b8a6;
-  --c3: #f59e0b;
-  --c4: #ec4899;
-  --shadow: 0 1px 2px rgba(20, 24, 40, .04), 0 4px 16px rgba(20, 24, 40, .05);
-  --radius: 18px;
+  --bg: #faf8f3;
+  --card: #fffefb;
+  --ink: #18202c;
+  --ink-2: #47505e;
+  --ink-3: #7b8089;
+  --line: #e3ddd0;
+  --soft: #f3efe5;
+  --brand: #1d5640;
+  --brand-soft: #e2ece5;
+  --brand-ink: #1d5640;
+  --good: #1d7f47;
+  --good-soft: #e1f1e6;
+  --bad: #b3302d;
+  --bad-soft: #f8e5e2;
+  --warn: #b7791f;
+  --c1: #1f5c46;
+  --c2: #4a7fb5;
+  --c3: #c9922a;
+  --c4: #a3476b;
+  --shadow: 0 1px 0 rgba(40, 32, 16, .04), 0 2px 8px rgba(40, 32, 16, .04);
+  --radius: 6px;
+  --font: "IBM Plex Sans", system-ui, sans-serif;
+  --on-status: #ffffff;
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #12141a; --card: #1b1e27; --ink: #eef0f5; --ink-2: #b7bdcb; --ink-3: #7d8496;
-    --line: #2a2e3a; --soft: #232733; --brand: #8b85ff; --brand-soft: #2a2850;
-    --good: #3ccf7a; --good-soft: #173826; --bad: #ff6b6f; --bad-soft: #3d1d20;
-    --c1: #8b85ff; --c2: #2dd4bf; --c3: #fbbf24; --c4: #f472b6;
-    --shadow: 0 1px 2px rgba(0,0,0,.3); color-scheme: dark;
+    --bg: #11151a; --card: #181d23; --ink: #eeeae1; --ink-2: #bdb8ac; --ink-3: #8c8a84;
+    --line: #2a3038; --soft: #20262d; --brand: #348262; --brand-ink: #6cc39c; --brand-soft: #1b3128;
+    --good: #4fc282; --good-soft: #163324; --bad: #f2756c; --bad-soft: #3b1e1c; --warn: #e2aa3e;
+    --c1: #5fb38e; --c2: #7fa9db; --c3: #e3b452; --c4: #d77ea2;
+    --shadow: 0 1px 0 rgba(0, 0, 0, .25); --on-status: #11151a; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #12141a; --card: #1b1e27; --ink: #eef0f5; --ink-2: #b7bdcb; --ink-3: #7d8496;
-  --line: #2a2e3a; --soft: #232733; --brand: #8b85ff; --brand-soft: #2a2850;
-  --good: #3ccf7a; --good-soft: #173826; --bad: #ff6b6f; --bad-soft: #3d1d20;
-  --c1: #8b85ff; --c2: #2dd4bf; --c3: #fbbf24; --c4: #f472b6;
-  --shadow: 0 1px 2px rgba(0,0,0,.3); color-scheme: dark;
+  --bg: #11151a; --card: #181d23; --ink: #eeeae1; --ink-2: #bdb8ac; --ink-3: #8c8a84;
+  --line: #2a3038; --soft: #20262d; --brand: #348262; --brand-ink: #6cc39c; --brand-soft: #1b3128;
+  --good: #4fc282; --good-soft: #163324; --bad: #f2756c; --bad-soft: #3b1e1c; --warn: #e2aa3e;
+  --c1: #5fb38e; --c2: #7fa9db; --c3: #e3b452; --c4: #d77ea2;
+  --shadow: 0 1px 0 rgba(0, 0, 0, .25); --on-status: #11151a; color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--ink);
-  font-family: "Plus Jakarta Sans", system-ui, sans-serif; font-size: 15px; line-height: 1.5;
+  font-family: var(--font); font-size: 15px; line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--brand); text-decoration: none; }
@@ -253,3 +259,40 @@ table.plain td { vertical-align: top; }
 .fv-big { font-size: 44px; font-weight: 800; letter-spacing: -.02em; margin-top: 6px; }
 .fv-verdict { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
 .seg button:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ---------- Ledger theme details (serif display type, tight corners, brand-ink text) */
+/* typography: serif display, sans body with tabular figures */
+body { font-variant-numeric: tabular-nums; }
+h1, h2, h3, .brand, .hero h1, .ident h1, .fv-big, .price .big {
+  font-family: var(--serif);
+  font-optical-sizing: auto;
+}
+h1, h2, .hero h1, .ident h1 { font-weight: 600; letter-spacing: -.01em; }
+h3 { font-weight: 600; }
+.brand { font-weight: 700; letter-spacing: -.005em; }
+.hero h1 em { font-style: italic; font-weight: 500; }
+.price .big, .fv-big { font-weight: 600; letter-spacing: -.01em; }
+.stat .k, .pill .k, th { letter-spacing: .02em; }
+
+/* components */
+.brand-mark { border-radius: 4px; font-family: var(--serif); font-style: italic; font-weight: 600; }
+.card, .tbl-wrap { box-shadow: var(--shadow); }
+.tab.on { border-bottom-width: 2px; }
+.seg { border-radius: 6px; }
+.seg button { border-radius: 4px; }
+.seg button.on { background: var(--card); box-shadow: inset 0 0 0 1px var(--line); }
+.chip, .tag, .badge { border-radius: 4px; }
+.search input { border-radius: 6px; }
+.suggest { border-radius: 6px; }
+.btn { border-radius: 4px; }
+.check { border-radius: 6px; }
+.takeaway { border-radius: 0 6px 6px 0; border-left: 3px solid var(--brand); }
+.pill { border-radius: 6px; }
+.q-emoji, .logo { border-radius: 6px; }
+.logo { font-family: var(--serif); }
+th { border-bottom: 1px solid var(--ink-3); }
+
+/* Brand-colored text uses --brand-ink: same as --brand in light mode, a lighter green in dark mode so it
+   stays readable on dark cards (--brand itself is kept dark enough for white text on it). */
+a, .tab.on, .seg button.on, .tbar .mk.now, .hero h1 em, .news a:hover .t, .logo { color: var(--brand-ink); }
+.check .ic { color: var(--on-status); }

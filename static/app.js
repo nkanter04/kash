@@ -148,7 +148,7 @@ async function loadStock(ticker) {
     if (!location.pathname.toUpperCase().endsWith("/" + ticker)) return; // navigated away
     state.data = d;
     // Chart.js caches label widths, so the web font must be ready before charts are drawn
-    await document.fonts.load('12px "Plus Jakarta Sans"').catch(() => {});
+    await document.fonts.load("12px " + css("--font")).catch(() => {});
     renderStock();
   } catch (e) {
     app.innerHTML = `<div class="error"><h2>Hmm, we couldn't load ${esc(ticker)}</h2><p class="sub">${esc(e.message)}</p><a href="/" data-link class="btn">Back home</a></div>`;
@@ -313,7 +313,7 @@ function gauge(n, total) {
   return `<svg viewBox="0 0 180 180"><circle cx="90" cy="90" r="${r}" fill="none" stroke="${css("--soft")}" stroke-width="16"/>
     <circle cx="90" cy="90" r="${r}" fill="none" stroke="${col}" stroke-width="16" stroke-linecap="round"
       stroke-dasharray="${C * f} ${C}" transform="rotate(-90 90 90)"/>
-    <text x="90" y="98" text-anchor="middle" font-size="40" font-weight="800" fill="${css("--ink")}" font-family="Plus Jakarta Sans">${n}/${total}</text></svg>`;
+    <text x="90" y="98" text-anchor="middle" font-size="40" font-weight="800" fill="${css("--ink")}" font-family='${css("--font")}'>${n}/${total}</text></svg>`;
 }
 
 function targetBar(i) {
@@ -380,7 +380,7 @@ function peTake() {
 function destroyCharts() { state.charts.forEach((c) => c.destroy()); state.charts = []; }
 function baseOpts(extra = {}) {
   const ink3 = css("--ink-3"), line = css("--line");
-  Chart.defaults.font.family = "Plus Jakarta Sans";
+  Chart.defaults.font.family = css("--font");
   Chart.defaults.color = ink3;
   return {
     responsive: true, maintainAspectRatio: false, animation: { duration: 350 },
@@ -456,7 +456,7 @@ const sessionBands = {
       ctx.fillStyle = css("--soft"); ctx.globalAlpha = 0.9;
       ctx.fillRect(x0, a.top, x1 - x0, a.height);
       ctx.globalAlpha = 1; ctx.fillStyle = css("--ink-3");
-      ctx.font = `600 11px "Plus Jakarta Sans"`; ctx.textBaseline = "top";
+      ctx.font = `600 11px ${css("--font")}`; ctx.textBaseline = "top";
       if (x1 - x0 > 70) ctx.fillText(SESSION_NAME[sess[k]], x0 + 8, a.top + 6);
       k = j + 1;
     }
