@@ -28,6 +28,15 @@ _lock = threading.Lock()
 app = FastAPI(title="Stock Analysis")
 
 
+@app.middleware("http")
+async def no_stale_frontend(request, call_next):
+    """Make browsers revalidate the page and static files, so an update shows on a normal refresh."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 # ---------------------------------------------------------------- helpers
 
 def clean(v):
