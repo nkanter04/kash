@@ -18,6 +18,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import company
 import sec
 from rows import BALANCE_ROWS, CASHFLOW_ROWS, INCOME_ROWS, RATIO_ROWS
 
@@ -115,6 +116,74 @@ class PriceBook:
         # yfinance closes (auto_adjust=False) are already split-adjusted to today's share basis,
         # the same basis as Yahoo's share counts/EPS and our split-normalized SEC figures
         return clean(sub["Close"].iloc[-1])
+
+
+# ---------------------------------------------------------------- price basis (foreign listings)
+
+# quotes in a currency's minor unit (London pence etc.) -> (major currency, divisor)
+SUBUNITS = {"GBp": ("GBP", 100), "GBX": ("GBP", 100), "ZAc": ("ZAR", 100), "ILA": ("ILS", 100)}
+FX_SECONDS = 86400
+_fx: dict[str, tuple[float, pd.Series | None]] = {}
+
+
+def fx_series(frm: str, to: str) -> pd.Series | None:
+    """Daily rate: units of `to` per 1 `frm` (Yahoo pair 'FROMTO=X'), tz-naive index. Cached for a day."""
+    pair = f"{frm}{to}=X"
+    with _lock:
+        hit = _fx.get(pair)
+        if hit and time.time() - hit[0] < FX_SECONDS:
+            return hit[1]
+    try:
+        s = yf.Ticker(pair).history(period="max", interval="1d")["Close"].dropna()
+        s.index = s.index.tz_localize(None) if s.index.tz is not None else s.index
+        s = s if not s.empty else None
+    except Exception:  # noqa: BLE001
+        s = None
+    with _lock:
+        _fx[pair] = (time.time(), s)
+    return s
+
+
+def share_ratio(stmt_shares: float | None, info: dict) -> float:
+    """Statement shares per quoted share: 5 for TSM (1 ADR = 5 shares), 2 for BHP, ~1500 for BRK-B, else 1."""
+    quoted = info.get("impliedSharesOutstanding") or info.get("sharesOutstanding")
+    if not quoted and info.get("marketCap") and info.get("currentPrice"):
+        quoted = info["marketCap"] / info["currentPrice"]
+    if not stmt_shares or not quoted:
+        return 1.0
+    r = stmt_shares / quoted
+    if abs(r - 1) < 0.25:   # ordinary share-count drift (buybacks, diluted vs. outstanding): not an ADR ratio
+        return 1.0
+    return float(f"{r:.2g}")   # ADR ratios are round numbers: 4.99 -> 5, 1499.6 -> 1500
+
+
+class PriceBasis:
+    """Turns a quoted share price into the statements' currency and share basis.
+
+    Ratios like P/E divide market cap (price x statement shares) by statement figures. For a foreign
+    listing such as TSM the price is USD per ADR while the statements are TWD per ordinary share, so
+    the price must be converted at that date's exchange rate and divided by the ADR ratio.
+    """
+
+    def __init__(self, info: dict, stmt_shares: float | None, fx_lookup=fx_series):
+        cur = info.get("currency")
+        self.scale = 1.0
+        if cur in SUBUNITS:
+            cur, div = SUBUNITS[cur]
+            self.scale = 1 / div
+        fin = info.get("financialCurrency") or cur
+        self.fx = fx_lookup(cur, fin) if cur and fin and cur != fin else None
+        self.missing_fx = bool(cur and fin and cur != fin and self.fx is None)
+        self.ratio = share_ratio(stmt_shares, info)
+
+    def convert(self, price: float | None, date=None) -> float | None:
+        if price is None or self.missing_fx:
+            return None   # better no ratio than a ratio off by the exchange rate
+        rate = 1.0
+        if self.fx is not None:
+            ts = pd.Timestamp(date).tz_localize(None) if date is not None else self.fx.index[-1]
+            rate = float(self.fx.asof(ts)) if ts >= self.fx.index[0] else float(self.fx.iloc[0])
+        return price * self.scale * rate / self.ratio
 
 
 # ---------------------------------------------------------------- statements
@@ -224,6 +293,11 @@ def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_fra
     qbal = t.quarterly_balance_sheet if period == "annual" else bal
     latest_q = qbal.columns[0] if qbal is not None and not qbal.empty else None
 
+    # prices are quoted per listed share in the trading currency; statements may differ (ADRs)
+    stmt_shares = (get(qbal, ["Ordinary Shares Number", "Share Issued"], latest_q) if latest_q is not None else None) \
+        or get(inc, ["Diluted Average Shares", "Basic Average Shares"], inc.columns.max())
+    basis = PriceBasis(info, stmt_shares)
+
     ctx = {"period": period, "info": info}
     income = build_table(INCOME_ROWS, {}, inc_cols, ctx)
     balance = build_table(BALANCE_ROWS, {}, bal_cols, ctx)
@@ -238,7 +312,7 @@ def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_fra
     for c in src_cols:
         date = c["date"]
         if date is None:  # TTM -> live price & latest balance sheet
-            price = clean(info.get("currentPrice") or info.get("regularMarketPrice"))
+            price = basis.convert(clean(info.get("currentPrice") or info.get("regularMarketPrice")))
             bget = (lambda s, col=latest_q: get(qbal, s, col)) if latest_q is not None else (lambda s: None)
             if c.get("_cf"):
                 cget = c["_cf"]
@@ -246,7 +320,7 @@ def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_fra
                 cget = cf_cols[0]["get"] if cf_cols and cf_cols[0]["date"] is None else (lambda s: None)
             label = "Current"
         else:
-            price = prices.price_at(date)
+            price = basis.convert(prices.price_at(date), date)
             ts = pd.Timestamp(date)
             bget = (lambda s, col=ts: get(bal, s, col)) if ts in bal.columns else (lambda s: None)
             cget = (lambda s, col=ts: get(cf, s, col)) if cf is not None and ts in cf.columns else (lambda s: None)
@@ -434,7 +508,7 @@ INFO_KEYS = [
     "marketCap", "enterpriseValue", "trailingPE", "forwardPE", "pegRatio", "trailingPegRatio", "priceToBook",
     "priceToSalesTrailing12Months", "enterpriseToEbitda", "trailingEps", "forwardEps", "beta",
     "dividendRate", "dividendYield", "payoutRatio", "fiftyTwoWeekHigh", "fiftyTwoWeekLow",
-    "fiftyDayAverage", "twoHundredDayAverage", "averageVolume", "sharesOutstanding",
+    "fiftyDayAverage", "twoHundredDayAverage", "averageVolume", "sharesOutstanding", "impliedSharesOutstanding",
     "profitMargins", "grossMargins", "operatingMargins", "returnOnEquity", "returnOnAssets",
     "revenueGrowth", "earningsGrowth", "totalCash", "totalDebt", "currentRatio", "debtToEquity",
     "freeCashflow", "totalRevenue", "ebitda", "targetMeanPrice", "targetHighPrice", "targetLowPrice",
@@ -584,6 +658,23 @@ def intraday(ticker: str, rng: str) -> dict:
 @app.get("/api/prices/{ticker}")
 def prices(ticker: str, range: str):  # noqa: A002  (query parameter name)
     return intraday(ticker, range)
+
+
+_company: dict[str, tuple[float, dict]] = {}
+
+
+@app.get("/api/company/{ticker}")
+def company_info(ticker: str):
+    """Profile, news, filings, analyst forecasts, ownership, dividends and fair value inputs."""
+    ticker = ticker.upper().strip()
+    with _lock:
+        hit = _company.get(ticker)
+        if hit and time.time() - hit[0] < CACHE_SECONDS:
+            return hit[1]
+    data = company.company_data(ticker)
+    with _lock:
+        _company[ticker] = (time.time(), data)
+    return data
 
 
 @app.get("/api/search")

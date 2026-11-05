@@ -1,7 +1,7 @@
 # Kash: notes for Claude
 
-Friendly stock analysis web app: FastAPI backend (`app.py`, `sec.py`, `rows.py`) and a vanilla JS
-single-page frontend (`static/`). Public repo: github.com/nkanter04/kash. See README.md for features.
+Friendly stock analysis web app: FastAPI backend (`app.py`, `sec.py`, `rows.py`, `company.py`) and a vanilla JS
+single-page frontend (`static/app.js`; the company tabs are in `static/company.js`). Public repo: github.com/nkanter04/kash. See README.md for features.
 
 ## Run and test
 
@@ -46,6 +46,17 @@ single-page frontend (`static/`). Public repo: github.com/nkanter04/kash. See RE
   yourself (Yahoo's `*ChangePercent` fields are in percent, unlike other fields), and outside regular hours
   measure from the official close (`regularMarketPrice` / `previousClose`), not the last 2-minute bar.
   The overnight session (20:00-4:00 ET) is not in Yahoo's data.
+- Company tabs (Forecast, Fair value, Ownership, Dividends, Company) share one lazy `/api/company/{ticker}` call
+  (cached 15 min, prefetched when a stock opens). Each section is fetched separately and is None/empty when
+  Yahoo lacks it (ETFs, foreign listings); every tab must render a friendly empty state for that.
+- Yahoo's long-term growth (`LTG`) estimate is blank for individual stocks; the fair value calculator uses
+  next fiscal year's EPS growth plus the company's own 5-year EPS/FCF growth (lower of the two, capped 20%).
+- **Foreign listings / share classes:** price-based ratios go through `PriceBasis`, which converts the quoted
+  price to the statement currency at that date's FX rate (`fx_series`, Yahoo pair like `USDTWD=X`) and divides
+  by `share_ratio` (statement shares per quoted share: TSM 5, BHP 2, BRK-B ~1/1500). The ratio needs
+  `impliedSharesOutstanding` (all share classes); `sharesOutstanding` counts only one class (GOOGL, NVO).
+  The live test `test_price_ratios_match_yahoo_across_listing_types` guards this.
+- JS `cagr()` takes `[{v}, ...]` objects (as returned by `annualSeries`), not plain numbers.
 - Frontend charts: Chart.js 4.4.1. Wait for the web font before drawing (Chart.js caches label widths).
 - The SEC requires a contact email in the User-Agent: `config.json` (gitignored; template in
   `config.example.json`) or `SEC_USER_AGENT`. Never commit `config.json` or put an email in code.

@@ -314,3 +314,36 @@ def annual_frames(ticker: str, max_years: int = 15, splits=None):
         "Cash Cash Equivalents And Short Term Investments", "Goodwill And Other Intangible Assets",
         "Total Debt", "Working Capital", "Common Stock Equity"]
     return frame(inc_names), frame(dict.fromkeys(bal_names)), frame(cf_names)
+
+
+# ------------------------------------------------------------------ recent filings
+
+FILINGS_TTL = 6 * 3600
+# forms worth showing to an investor (insider Form 4s and fund paperwork would drown these out)
+KEY_FORMS = {
+    "10-K": "Annual report", "10-Q": "Quarterly report", "8-K": "Major event / news",
+    "20-F": "Annual report (foreign company)", "6-K": "Report (foreign company)", "40-F": "Annual report (Canada)",
+    "DEF 14A": "Proxy statement (shareholder vote, pay)", "S-1": "Registration (new shares)",
+    "10-K/A": "Annual report (amended)", "10-Q/A": "Quarterly report (amended)",
+}
+
+
+def recent_filings(ticker: str, limit: int = 12) -> list[dict]:
+    """Most recent key filings with links to the document on sec.gov (works for any SEC filer)."""
+    cik = cik_for(ticker)
+    if not cik:
+        return []
+    sub = _fetch(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", CACHE / f"submissions_{cik}.json", FILINGS_TTL)
+    recent = ((sub or {}).get("filings") or {}).get("recent") or {}
+    out = []
+    for form, filed, acc, doc, desc in zip(recent.get("form", []), recent.get("filingDate", []),
+                                           recent.get("accessionNumber", []), recent.get("primaryDocument", []),
+                                           recent.get("primaryDocDescription", [])):
+        if form not in KEY_FORMS:
+            continue
+        folder = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}"
+        out.append({"form": form, "what": KEY_FORMS[form], "date": filed, "description": desc or None,
+                    "url": f"{folder}/{doc}" if doc else folder + "/"})
+        if len(out) >= limit:
+            break
+    return out

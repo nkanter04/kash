@@ -230,7 +230,8 @@ RATIO_ROWS = [
     {"key": "ev", "label": "Enterprise Value", "fmt": "money", "calc": _ev,
      "desc": "Market cap plus debt minus cash: the price to buy the whole business, debts and all."},
     {"key": "price", "label": "Share Price", "fmt": "eps", "calc": lambda c: c["price"],
-     "desc": "Stock price at the end of the period."},
+     "desc": "Stock price at the end of the period. For foreign listings (ADRs) it is converted to the "
+             "reporting currency and to one ordinary share, so it matches the statements."},
     {"key": "pe", "label": "P/E Ratio", "fmt": "x", "style": "bold", "calc": lambda c: _pos(_div(_mcap(c), _pos(_flow(c, NI)))),
      "desc": "Price ÷ earnings. How many dollars you pay for $1 of yearly profit. Lower can mean cheaper."},
     {"key": "ps", "label": "P/S Ratio", "fmt": "x", "calc": lambda c: _div(_mcap(c), _flow(c, REV)),

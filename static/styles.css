@@ -216,3 +216,40 @@ td.spark { width: 90px; padding: 4px 10px; }
   .price { text-align: left; }
   th:first-child, td:first-child { min-width: 170px; }
 }
+
+/* ---------- company tabs (company.js) */
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { white-space: nowrap; flex: none; }
+table.plain th:first-child, table.plain td:first-child { min-width: 0; position: static; }
+table.plain th.l, table.plain td.l { text-align: left; }
+table.plain td { vertical-align: top; }
+.small { font-size: 12.5px; font-weight: 500; }
+.wrap-text { white-space: normal; max-width: 340px; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700;
+  background: var(--soft); color: var(--ink-2); }
+.badge.good { background: var(--good-soft); color: var(--good); }
+.badge.bad { background: var(--bad-soft); color: var(--bad); }
+.ratingbar { display: flex; height: 14px; border-radius: 9px; overflow: hidden; margin: 16px 0 10px; background: var(--soft); }
+.ratingbar i { display: block; height: 100%; }
+.legend-row { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--ink-2); }
+.legend-row i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.news { list-style: none; margin: 0; padding: 4px 18px; }
+.news li { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.news li:last-child { border-bottom: 0; }
+.news a { color: var(--ink); text-decoration: none; }
+.news a:hover .t { color: var(--brand); text-decoration: underline; }
+.news .t { font-weight: 700; }
+.news .m { font-size: 12.5px; color: var(--ink-3); margin-top: 3px; }
+.news p { margin: 5px 0 0; color: var(--ink-2); font-size: 14px; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden; }
+.news-grid { align-items: start; }
+.fv-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .fv-grid { grid-template-columns: minmax(0, 1fr); } }
+.slider { margin: 18px 0; }
+.slider label { display: flex; justify-content: space-between; font-weight: 600; font-size: 14px; }
+.slider input { width: 100%; accent-color: var(--brand); margin: 8px 0 2px; }
+.slider .hint { font-size: 12.5px; }
+.fv-big { font-size: 44px; font-weight: 800; letter-spacing: -.02em; margin-top: 6px; }
+.fv-verdict { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 2px; }
+.seg button:disabled { opacity: .4; cursor: not-allowed; }

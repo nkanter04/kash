@@ -112,3 +112,34 @@ def test_1d_includes_extended_hours():
     assert len(d["sessions"]) == len(d["points"])
     assert "r" in d["sessions"] or "p" in d["sessions"]
     assert d["sessions"] == sorted(d["sessions"], key="pra".index)   # pre, then regular, then after
+
+
+def test_company_details_for_a_large_company():
+    import company
+    c = company.company_data("AAPL")
+    assert c["profile"]["officers"] and c["profile"]["dates"]["earnings"]
+    assert c["news"] and all(n["url"].startswith("http") for n in c["news"])
+    assert c["forecast"]["eps"] and c["forecast"]["ratings"]
+    assert c["ownership"]["institutions"]
+    assert c["dividends"]["streak"] >= 10
+    assert c["fairValue"]["eps"] > 0
+    if sec._user_agent():
+        assert c["filings"] and c["filings"][0]["url"].startswith("https://www.sec.gov/")
+
+
+def test_company_details_for_a_fund_degrade_gracefully():
+    import company
+    c = company.company_data("SPY")
+    assert c["fairValue"]["eps"] is None
+    assert c["dividends"]["rate"] > 0      # funds have no dividendRate; the last 12 months are used
+
+
+@pytest.mark.parametrize("ticker", ["TSM", "NVO", "BHP", "GOOGL", "AAPL"])
+def test_price_ratios_match_yahoo_across_listing_types(stocks, ticker):
+    """ADRs (TSM: TWD statements, 1 ADR = 5 shares; BHP: 2 shares; NVO: DKK) and multi-class shares
+    (GOOGL) must give the same current P/E as Yahoo, and a sane history."""
+    d = stocks(ticker)
+    pe = app.series_of(d["financials"]["annual"]["ratios"], "pe")
+    yahoo = d["info"]["trailingPE"]
+    assert pe[0] == pytest.approx(yahoo, rel=0.15)
+    assert all(3 < v < 120 for v in pe[1:] if v is not None)

@@ -20,6 +20,14 @@ and is the price right?
 - **Up to 15 years of annual statements** from SEC EDGAR 10-K filings, merged with Yahoo Finance for the gaps.
 - **Split-consistent history**: SEC share counts and EPS are restated to today's share basis, so P/E and
   per-share history stay correct across stock splits.
+- **Forecast:** analysts' buy/hold/sell ratings, price targets, revenue and EPS estimates, the record of
+  beating or missing estimates, and recent upgrades and downgrades.
+- **Fair value calculator** (EverythingMoney-style): adjust growth, the ending P/E (or P/FCF) and the return
+  you want, and see what the stock could be worth today, with conservative and optimistic cases.
+- **Ownership:** largest institutional holders and recent insider buying and selling.
+- **Dividends:** yearly dividends per share, growth, payout ratio and how many years in a row it was raised.
+- **Company:** key dates (next earnings, ex-dividend), trading stats, leadership and pay, latest news,
+  and links to recent SEC filings.
 - **Hover explanations** on every statement line and ratio, sparklines for each row, and CSV export.
 - Price chart from 1 day (with pre-market and after-hours trading) to the full listing history, P/E history, analyst targets, and dark mode.
 
@@ -59,9 +67,11 @@ historical P/E is in a sensible range.
 - `sec.py`: reads SEC EDGAR XBRL "company facts" and maps US-GAAP tags onto the same line items, with
   per-year tag fallbacks (companies rename tags over time), restatement handling (latest filing wins)
   and split normalization. Downloads are cached in `.cache/`.
+- `company.py`: company details for the Forecast, Fair value, Ownership, Dividends and Company tabs
+  (`/api/company/{ticker}`), plus recent SEC filings from `sec.py`.
 - `rows.py`: every statement and ratio line, with its label, data source or formula, and plain-English
   description.
-- `static/`: the single-page frontend (vanilla JS and Chart.js).
+- `static/`: the single-page frontend (vanilla JS and Chart.js); `company.js` holds the company tabs.
 
 ## Data and limitations
 

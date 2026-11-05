@@ -196,12 +196,17 @@ function renderStock() {
         <div class="range-l num"><span>${pxStr(lo)}</span><span>${pxStr(hi)}</span></div></div>
     </div>
     <nav class="tabs">
-      <button class="tab ${state.tab === "overview" ? "on" : ""}" data-tab="overview">Overview</button>
-      <button class="tab ${state.tab === "financials" ? "on" : ""}" data-tab="financials">Financials</button>
+      ${[["overview", "Overview"], ["financials", "Financials"], ...Object.entries(COMPANY_TABS).map(([k, [label]]) => [k, label])]
+        .map(([k, label]) => `<button class="tab ${state.tab === k ? "on" : ""}" data-tab="${k}">${label}</button>`).join("")}
     </nav>
     <div id="tabBody"></div>`;
   app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { state.tab = b.dataset.tab; renderStock(); }));
-  if (state.tab === "overview") renderOverview(); else renderFinancials();
+  $(".tabs .tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  loadCompany(d.ticker).catch(() => {});   // start fetching company details in the background
+  if (state.tab === "overview") renderOverview();
+  else if (state.tab === "financials") renderFinancials();
+  else if (COMPANY_TABS[state.tab]) renderCompanyTab(state.tab, COMPANY_TABS[state.tab][1]);
+  else { state.tab = "overview"; renderOverview(); }
 }
 const stat = (k, v, tip) => `<div class="stat"><div class="k">${k}${tip ? info(tip) : ""}</div><div class="v num">${v}</div></div>`;
 const info = (t) => `<span class="info" data-tip="${esc(t)}">i</span>`;

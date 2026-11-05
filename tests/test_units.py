@@ -224,3 +224,38 @@ def test_extended_quote(extra, expected):
     else:
         assert q["label"] == expected[0]
         assert q["pct"] == pytest.approx(expected[1])
+
+
+# ---------------------------------------------------------------- foreign listings / share classes
+
+@pytest.mark.parametrize("stmt,info,ratio", [
+    (25.9e9, {"impliedSharesOutstanding": 5.186e9}, 5.0),        # TSM: 1 ADR = 5 ordinary shares
+    (5.07e9, {"impliedSharesOutstanding": 2.54e9}, 2.0),         # BHP: 1 ADR = 2 shares
+    (1.4317e6, {"impliedSharesOutstanding": 2.1407e9, "sharesOutstanding": 1.408e9}, 0.00067),  # BRK-B vs class A
+    (12.29e9, {"impliedSharesOutstanding": 12.294e9, "sharesOutstanding": 5.888e9}, 1.0),       # GOOGL: all classes
+    (14.4e9, {"sharesOutstanding": 14.53e9}, 1.0),               # ordinary drift is not an ADR ratio
+    (None, {"sharesOutstanding": 1e9}, 1.0),
+])
+def test_share_ratio(stmt, info, ratio):
+    assert app.share_ratio(stmt, info) == pytest.approx(ratio)
+
+
+def _fx(frm, to):
+    assert (frm, to) == ("USD", "TWD")
+    return pd.Series([30.0, 32.0], index=pd.DatetimeIndex(["2024-01-02", "2025-01-02"]))
+
+
+def test_price_basis_converts_adr_price_to_statement_basis():
+    b = app.PriceBasis({"currency": "USD", "financialCurrency": "TWD", "impliedSharesOutstanding": 5e9}, 25e9, fx_lookup=_fx)
+    assert b.convert(100.0, "2024-06-30") == pytest.approx(100 * 30 / 5)    # rate in force on that date
+    assert b.convert(100.0, "2020-01-01") == pytest.approx(100 * 30 / 5)    # before FX history: earliest rate
+    assert b.convert(100.0) == pytest.approx(100 * 32 / 5)                  # "Current": latest rate
+
+
+def test_price_basis_handles_pence_and_missing_fx():
+    pence = app.PriceBasis({"currency": "GBp", "financialCurrency": "GBP"}, None, fx_lookup=lambda a, b: None)
+    assert pence.convert(250.0) == pytest.approx(2.5)
+    no_fx = app.PriceBasis({"currency": "USD", "financialCurrency": "DKK"}, None, fx_lookup=lambda a, b: None)
+    assert no_fx.convert(100.0) is None      # no ratio beats a ratio that is off by the exchange rate
+    us = app.PriceBasis({"currency": "USD", "financialCurrency": "USD"}, 1e9, fx_lookup=_fx)
+    assert us.convert(100.0, "2024-06-30") == 100.0
