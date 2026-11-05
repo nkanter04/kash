@@ -2,3 +2,4 @@ yfinance
 fastapi
 uvicorn
 pandas
+watchfiles

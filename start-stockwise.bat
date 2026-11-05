@@ -9,7 +9,7 @@ if not exist ".venv\Scripts\python.exe" (
 echo Starting Stockwise at http://localhost:8050  (close this window to stop)
 rem open the browser after a few seconds, once the server is up
 start "" /min cmd /c "timeout /t 5 /nobreak >nul & start http://localhost:8050"
-".venv\Scripts\python.exe" -m uvicorn app:app --port 8050
+".venv\Scripts\python.exe" -m uvicorn app:app --port 8050 --reload
 pause
 exit /b
 

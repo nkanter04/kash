@@ -40,6 +40,18 @@ Then open http://localhost:8050 (or http://localhost:8050/stock/ACN).
 `config.example.json` to `config.json` and put your own email in it, or set the `SEC_USER_AGENT`
 environment variable. Without one, the app still works but uses Yahoo's ~4 years of annual data.
 
+## Tests
+
+```bash
+.venv/Scripts/python -m pip install -r requirements-dev.txt
+.venv/Scripts/python -m pytest                    # everything (~20 s)
+.venv/Scripts/python -m pytest -m "not network"   # offline unit tests only
+```
+
+The live-data tests (`-m network`) check the numbers against reality: SEC revenue matches Yahoo,
+EPS × shares matches net income in every year (which catches stock-split errors), and Apple's
+historical P/E is in a sensible range.
+
 ## How it works
 
 - `app.py`: FastAPI backend. Fetches Yahoo Finance data (via yfinance), merges in SEC history, and builds

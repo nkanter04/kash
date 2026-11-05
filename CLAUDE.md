@@ -1,0 +1,44 @@
+# Stockwise: notes for Claude
+
+Friendly stock analysis web app: FastAPI backend (`app.py`, `sec.py`, `rows.py`) and a vanilla JS
+single-page frontend (`static/`). Public repo: github.com/nkanter04/stockwise. See README.md for features.
+
+## Run and test
+
+- Server: `.venv/Scripts/python -m uvicorn app:app --port 8050 --reload` (or `start-stockwise.bat`, or the
+  `stockwise` entry in `.claude/launch.json`). `--reload` restarts on .py changes; static files are served
+  fresh, so a browser refresh is enough for frontend edits.
+- Tests: `.venv/Scripts/python -m pytest` runs everything (~20 s).
+  `-m "not network"` runs only the offline unit tests (~5 s); `-m network` runs only the live-data checks.
+  Run the tests after any change to `app.py`, `sec.py` or `rows.py`.
+- Responses are cached in memory for 15 min per ticker, and SEC downloads on disk in `.cache/` (1 day for
+  company facts). Restart the server to clear the in-memory cache when checking a data fix.
+
+## Data gotchas (each of these was a real bug once)
+
+- **Split basis:** yfinance closes (`auto_adjust=False`), share counts and EPS are already split-adjusted
+  to today. SEC share counts are multiplied, and EPS divided, by the splits *after each fact's filing date*
+  (`sec._split_factor`). Never apply a split factor to prices. The live test
+  `test_eps_times_shares_matches_net_income` catches basis mix-ups.
+- **Dividend yield:** Yahoo's `dividendYield` units are inconsistent; use `info["dividendYieldCalc"]`
+  (dividendRate / price).
+- **TTM:** sum four quarters for flows, but share counts use the latest quarter. Drop the TTM column when the
+  latest quarter is the fiscal year-end (it would duplicate the FY column).
+- **SEC tags change over time:** `_pick` falls back between concept names per year; the latest filing wins
+  for restatements. Flows must span 340-380 days; instants have no `start`.
+- **Total Debt (SEC years)** excludes operating leases, so it is lower than Yahoo's figure. This is intended.
+- **Non-USD filers** (e.g. TSM, TWD): money text in the scorecard goes through `_short`, which reads the
+  currency from `_CUR.code`.
+- Foreign IFRS filers and ETFs have no US-GAAP SEC facts and fall back to Yahoo (~4 years).
+
+## Conventions
+
+- Scorecard (`app.scorecard`): 8 pillars, each skipped when its data is missing. A check's pass/fail and its
+  text must use the same rounded condition. Annual windows: 5 years (6 fiscal-year columns); P/E compares
+  with up to 10 years. Ratio tables start with a "Current" column.
+- Every statement/ratio row in `rows.py` needs a plain-English `desc`: the friendly explanations are the
+  point of the app.
+- Frontend charts: Chart.js 4.4.1. Wait for the web font before drawing (Chart.js caches label widths).
+- The SEC requires a contact email in the User-Agent: `config.json` (gitignored; template in
+  `config.example.json`) or `SEC_USER_AGENT`. Never commit `config.json` or put an email in code.
+- Not investment advice: keep the disclaimer in the footer and README.
