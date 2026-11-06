@@ -9,6 +9,10 @@ single-page frontend (`static/app.js`; company tabs in `static/company.js`, home
 - Server: `.venv/Scripts/python -m uvicorn app:app --port 8050 --reload` (or `start-kash.bat`, or the
   `kash` entry in `.claude/launch.json`). `--reload` restarts on .py changes; static files are served
   fresh, so a browser refresh is enough for frontend edits.
+- On the owner's PC the server auto-starts hidden at login (Startup-folder shortcut to `run-kash-hidden.vbs`,
+  log in `.cache/server.log`). Stop it with `stop-kash.ps1`/`.bat`: with `--reload` the process serving port 8050
+  is a `spawn_main` child whose command line doesn't mention uvicorn, so the script also uses the PID the app
+  writes to `.cache/server.pid` at startup. Restart it after stopping (run the .vbs) so the owner isn't left without it.
 - Tests: `.venv/Scripts/python -m pytest` runs everything (~20 s).
   `-m "not network"` runs only the offline unit tests (~5 s); `-m network` runs only the live-data checks.
   Run the tests after any change to `app.py`, `sec.py` or `rows.py`.

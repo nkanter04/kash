@@ -6,6 +6,11 @@ if not exist ".venv\Scripts\python.exe" (
   python -m venv .venv || goto :fail
   ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :fail
 )
+rem already running (e.g. auto-started at login)? just open it
+curl -s -o nul --max-time 3 http://localhost:8050/ && (
+  start "" http://localhost:8050
+  exit /b
+)
 echo Starting Kash at http://localhost:8050  (close this window to stop)
 rem open the browser after a few seconds, once the server is up
 start "" /min cmd /c "timeout /t 5 /nobreak >nul & start http://localhost:8050"

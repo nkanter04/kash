@@ -7,6 +7,7 @@ a simple scorecard. Run with:  python -m uvicorn app:app --port 8050
 from __future__ import annotations
 
 import math
+import os
 import threading
 import time
 from pathlib import Path
@@ -14,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -28,7 +31,24 @@ CACHE_SECONDS = 15 * 60
 _cache: dict[str, tuple[float, dict]] = {}
 _lock = threading.Lock()
 
-app = FastAPI(title="Stock Analysis")
+PID_FILE = Path(__file__).parent / ".cache" / "server.pid"
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    """Record the serving process's PID so stop-kash.ps1 can stop it (with --reload it's a child process
+    whose command line doesn't mention uvicorn)."""
+    PID_FILE.parent.mkdir(exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    yield
+    try:
+        if PID_FILE.read_text(encoding="utf-8").strip() == str(os.getpid()):
+            PID_FILE.unlink()
+    except OSError:
+        pass
+
+
+app = FastAPI(title="Kash", lifespan=lifespan)
 
 
 @app.middleware("http")

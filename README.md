@@ -38,7 +38,13 @@ and is the price right?
 ## Run
 
 On Windows, double-click `start-kash.bat`. It sets up the environment on first run, starts the
-server and opens http://localhost:8050. Close its window to stop. Or manually:
+server and opens http://localhost:8050 (if Kash is already running, it just opens it). Close its window to stop.
+
+**Start automatically at login (Windows):** put a shortcut to `run-kash-hidden.vbs` in your Startup folder
+(press Win+R, type `shell:startup`). It runs the server in the background with no window and logs to
+`.cache/server.log`. Double-click `stop-kash.bat` to stop it; delete the shortcut to turn auto-start off.
+
+Or run it manually:
 
 ```bash
 python -m venv .venv
