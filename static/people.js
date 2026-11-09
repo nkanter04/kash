@@ -5,7 +5,7 @@
 fetch("/api/config").then((r) => r.json()).then((c) => { if (!c.people) document.querySelector('#mainnav a[href="/people"]')?.remove(); }).catch(() => {});
 
 const ppl = { group: "all", cache: {} };
-const GROUP_TABS = [["all", "Everyone"], ["congress", "Congress"], ["executive", "President"], ["insider", "Corporate insiders"]];
+const GROUP_TABS = [["all", "Everyone"], ["congress", "Congress"], ["insider", "Corporate insiders"]];
 const personLink = (id, name, party) => `<a href="/people/${encodeURIComponent(id)}" data-link><b>${esc(name)}</b></a>${party ? `<span class="party ${esc(party[0])}" title="${esc(party)}">${esc(party[0])}</span>` : ""}`;
 const pts = (v) => (v == null ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(1) + " pts");
 const ptsCell = (v) => `<td class="${v == null ? "" : v >= 0 ? "up" : "down"}">${pts(v)}</td>`;
