@@ -117,7 +117,8 @@ INSTANT = {
     "Cash And Cash Equivalents": ["CashAndCashEquivalentsAtCarryingValue", "Cash",
                                   "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"],
     "Other Short Term Investments": ["ShortTermInvestments", "MarketableSecuritiesCurrent",
-                                     "AvailableForSaleSecuritiesDebtSecuritiesCurrent", "AvailableForSaleSecuritiesCurrent"],
+                                     "AvailableForSaleSecuritiesDebtSecuritiesCurrent", "AvailableForSaleSecuritiesCurrent",
+                                     "DebtSecuritiesAvailableForSaleExcludingAccruedInterestCurrent"],
     "Cash Cash Equivalents And Short Term Investments": ["CashCashEquivalentsAndShortTermInvestments"],
     "Receivables": ["AccountsReceivableNetCurrent", "ReceivablesNetCurrent",
                     "AccountsReceivableBilledAndUnbilledNetCurrent"],
@@ -130,8 +131,12 @@ INSTANT = {
     "Accounts Payable": ["AccountsPayableCurrent"],
     "Current Deferred Revenue": ["ContractWithCustomerLiabilityCurrent", "DeferredRevenueCurrent"],
     "Current Liabilities": ["LiabilitiesCurrent"],
-    "Long Term Debt": ["LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations"],
-    "_LTD_Current": ["LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent"],
+    # convertible notes are often tagged separately from ordinary debt, so they come last as per-year fallbacks
+    "Long Term Debt": ["LongTermDebtNoncurrent", "LongTermDebtAndCapitalLeaseObligations",
+                       "ConvertibleLongTermNotesPayable", "ConvertibleNotesPayableNoncurrent"],
+    "_LTD_Current": ["LongTermDebtCurrent", "LongTermDebtAndCapitalLeaseObligationsCurrent",
+                     "ConvertibleNotesPayableCurrent"],
+    "_Convertible_Total": ["ConvertibleNotesPayable"],
     "_LTD_Total": ["LongTermDebt"],
     "_ShortBorrow": ["ShortTermBorrowings", "CommercialPaper", "DebtCurrent"],
     "_FinLease": ["FinanceLeaseLiability"],
@@ -288,6 +293,8 @@ def annual_frames(ticker: str, max_years: int = 15, splits=None):
         ltd_total = r("_LTD_Total", e)
         if ltd_total is None and (r("Long Term Debt", e) is not None or r("_LTD_Current", e) is not None):
             ltd_total = (r("Long Term Debt", e) or 0) + (r("_LTD_Current", e) or 0)
+        if ltd_total is None:
+            ltd_total = r("_Convertible_Total", e)
         if ltd_total is not None or r("_ShortBorrow", e) is not None:
             rows.setdefault("Total Debt", {})[e] = (ltd_total or 0) + (r("_ShortBorrow", e) or 0) + (r("_FinLease", e) or 0)
         elif r("Total Assets", e) is not None:
@@ -347,3 +354,19 @@ def recent_filings(ticker: str, limit: int = 12) -> list[dict]:
         if len(out) >= limit:
             break
     return out
+
+
+def filer_info(ticker: str, months: int = 24) -> dict:
+    """Who the SEC says this ticker is, and its previous name if it changed recently (merger, rebrand)."""
+    cik = cik_for(ticker)
+    if not cik:
+        return {}
+    sub = _fetch(f"https://data.sec.gov/submissions/CIK{cik:010d}.json", CACHE / f"submissions_{cik}.json", FILINGS_TTL) or {}
+    out = {"name": sub.get("name")}
+    former = sorted(sub.get("formerNames") or [], key=lambda f: f.get("to") or "", reverse=True)
+    if former and former[0].get("to"):
+        changed = date.fromisoformat(former[0]["to"][:10])
+        if (date.today() - changed).days <= months * 30.5:
+            out.update(formerName=former[0].get("name"), renamed=changed.isoformat())
+    return out
+

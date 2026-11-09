@@ -16,8 +16,17 @@
       <a href="/" class="brand" data-link>
         <span class="brand-mark">K</span><span>Kash</span>
       </a>
+      <nav class="mainnav" id="mainnav">
+        <a href="/" data-link>Markets</a>
+        <a href="/screener" data-link>Screener</a>
+        <a href="/compare" data-link>Compare</a>
+        <a href="/earnings" data-link>Earnings</a>
+        <a href="/portfolio" data-link>Portfolio</a>
+        <a href="/macro" data-link>Macro</a>
+        <a href="/assets" data-link>Assets</a>
+      </nav>
       <div class="search" id="search">
-        <input id="q" type="search" placeholder="Search a company or ticker…" autocomplete="off" spellcheck="false">
+        <input id="q" type="search" placeholder="Search a company or ticker  ( / )" autocomplete="off" spellcheck="false">
         <ul id="suggest" class="suggest" hidden></ul>
       </div>
       <button class="theme-btn" id="themeBtn" title="Toggle dark mode" aria-label="Toggle dark mode">◐</button>
@@ -34,6 +43,7 @@
   <script src="/static/app.js"></script>
   <script src="/static/company.js"></script>
   <script src="/static/market.js"></script>
+  <script src="/static/pages.js"></script>
   <script>route();</script>
 </body>
 </html>

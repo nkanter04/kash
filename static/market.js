@@ -2,7 +2,7 @@
    Loaded after app.js and uses its helpers (esc, money, signed, pct, css, destroyCharts, POPULAR). */
 
 const HEAT_INDEXES = [["sp500", "S&P 500"], ["ndx", "Nasdaq-100"], ["dow", "Dow 30"]];
-const home = { index: "sp500", maps: {}, summary: null };   // maps: index -> { at, data }
+const home = { index: "sp500", maps: {}, summary: null, when: "day" };   // maps: index -> { at, data }
 
 function renderHome() {
   destroyCharts();
@@ -12,17 +12,29 @@ function renderHome() {
   app.innerHTML = `
     <section class="home-head"><h1>Markets</h1><p class="sub">${today}</p></section>
     <div class="idx-row" id="idxRow">${SUMMARY_SLOTS.map(() => `<div class="card idx-card skeleton"></div>`).join("")}</div>
+    <div id="breadthBox"></div>
+    <div id="watchBox"></div>
     <section><div class="card">
       <div class="row-between">
         <div><h3>Heat map</h3><div class="muted" id="hmNote">Each box is a company: size shows its market value, color shows today's move.</div></div>
         <div class="seg" id="hmSeg">${HEAT_INDEXES.map(([k, l]) => `<button data-i="${k}" class="${k === home.index ? "on" : ""}">${l}</button>`).join("")}</div>
       </div>
+      <div class="seg hm-when" id="hmWhen">${[["day", "Today"], ["year", "1 year"]].map(([k, l]) => `<button data-w="${k}" class="${k === home.when ? "on" : ""}">${l}</button>`).join("")}</div>
       <div class="heatmap" id="heatmap"></div>
-      <div class="hm-legend">${[-0.03, -0.02, -0.01, 0, 0.01, 0.02, 0.03].map((v) => `<span style="background:${heatColor(v)};color:${heatText(v)}">${v > 0 ? "+" : ""}${(v * 100).toFixed(0)}%</span>`).join("")}</div>
+      <div class="hm-legend" id="hmLegend"></div>
     </div></section>
-    <section><h2>Look up a company</h2><p class="sub">Search at the top of the page, or start with one of these.</p>
+    <div id="moversBox"></div>
+    <section><h2>Look up a company</h2><p class="sub">Search at the top of the page (press / from anywhere), or start here.</p>
+      ${store("kash-recent", []).length ? `<div class="k-label">Recently viewed</div><div class="chips left" style="margin-bottom:14px">${store("kash-recent", []).slice(0, 8).map((s) => `<a class="chip" href="/stock/${encodeURIComponent(s)}" data-link>${esc(s)}</a>`).join("")}</div><div class="k-label">Popular</div>` : ""}
       <div class="chips left">${POPULAR.map(([s, n]) => `<a class="chip" href="/stock/${s}" data-link>${s} <small>${n}</small></a>`).join("")}</div>
     </section>`;
+  $("#hmWhen").onclick = (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    home.when = b.dataset.w;
+    $("#hmWhen").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+    const m = home.maps[home.index]; if (m) drawHeatmap(m.data);
+  };
+  drawLegend();
   $("#hmSeg").onclick = (e) => {
     const b = e.target.closest("button"); if (!b) return;
     home.index = b.dataset.i;
@@ -31,6 +43,39 @@ function renderHome() {
   };
   loadSummary();
   loadHeatmap();
+  loadMovers();
+  loadWatchlist();
+}
+function drawLegend() {
+  const m = home.when === "year" ? 10 : 1;   // the color scale is 10x wider for 1-year moves
+  $("#hmLegend").innerHTML = [-0.03, -0.02, -0.01, 0, 0.01, 0.02, 0.03].map((v) => `<span style="background:${heatColor(v)};color:${heatText(v)}">${v > 0 ? "+" : ""}${(v * 100 * m).toFixed(0)}%</span>`).join("");
+}
+
+/* ------------------------------------------------------------ breadth, movers, watchlist */
+async function loadMovers() {
+  let d;
+  try { d = await getJSON("/api/market/movers"); } catch { return; }
+  if (!$("#moversBox")) return;
+  const b = d.breadth, upPct = b.total ? (b.up / b.total) * 100 : 50;
+  $("#breadthBox").innerHTML = `<div class="card breadth">
+    <div class="bar-wrap"><div class="row-between small-row"><span class="up"><b>${b.up}</b> up</span><b class="muted">S&P 500 today</b><span class="down"><b>${b.down}</b> down</span></div>
+      <div class="bbar"><i style="width:${upPct}%"></i></div></div>
+    ${[["Above 50-day avg", pct(b.above50, 0)], ["Above 200-day avg", pct(b.above200, 0)], ["Near 52-week high", b.newHighs], ["Near 52-week low", b.newLows]].map(([k, v]) => `<div class="stat-mini"><div class="k">${k}</div><div class="v num">${v}</div></div>`).join("")}</div>`;
+  const list = (title, rows, right) => `<div class="card"><h3>${title}</h3><table class="plain mini"><tbody>${rows.map((r) => `<tr><td class="l co">${stockLink(r.symbol)}<div class="muted small nm">${esc(r.name || "")}</div></td><td>${fmtPrice(r.price)}</td>${right(r)}</tr>`).join("") || `<tr><td class="muted">None today</td></tr>`}</tbody></table></div>`;
+  const chg = (r) => chgCell(r.change);
+  $("#moversBox").innerHTML = `<section><h2>Movers</h2><p class="sub">US-listed companies worth $2B or more.</p><div class="grid g2 movers">
+    ${list("Top gainers", d.gainers, chg)}${list("Top losers", d.losers, chg)}
+    ${list("Unusual volume", d.unusual, (r) => `<td><b>${r.volRatio.toFixed(1)}×</b> normal</td>`)}${list("Largest near 52-week highs", d.highs, chg)}
+  </div></section>`;
+}
+async function loadWatchlist() {
+  const w = watch.all(), box = $("#watchBox");
+  if (!box || !w.length) return;
+  let rows;
+  try { rows = await getJSON("/api/quotes?symbols=" + encodeURIComponent(w.join(","))); } catch { return; }
+  if (!$("#watchBox")) return;
+  $("#watchBox").innerHTML = `<section><div class="row-between"><h2>Your watchlist</h2><a class="btn" href="/compare?t=${w.slice(0, 5).map(encodeURIComponent).join(",")}" data-link>Compare</a></div>
+    <div class="watch-grid">${rows.map((r) => `<a class="card watch-card" href="/stock/${encodeURIComponent(r.symbol)}" data-link><div class="row-between"><b>${esc(r.symbol)}</b>${starBtn(r.symbol)}</div><div class="v num">${fmtPrice(r.price)}</div><div class="num ${(r.change ?? 0) >= 0 ? "up" : "down"}">${signed(r.change, 2)}</div></a>`).join("")}</div></section>`;
 }
 const SUMMARY_SLOTS = [0, 1, 2, 3];
 
@@ -98,15 +143,17 @@ function drawHeatmap(d) {
     const tiles = squarify(s.items.map((i) => ({ value: i.cap, i })), { x: 0, y: head, w, h: h - head });
     for (const t of tiles) {
       const i = t.it.i, small = Math.min(t.w, t.h);
+      const yr = home.when === "year", shown = yr ? i.ch1y : i.change, tone = shown == null ? null : yr ? shown / 10 : shown;
       const fs = Math.max(9, Math.min(26, Math.sqrt(t.w * t.h) / 5.5));
-      const label = t.w > 28 && t.h > 16 ? `<b style="font-size:${fs}px">${esc(i.symbol)}</b>${t.h > fs * 2.6 && t.w > 40 ? `<span style="font-size:${Math.max(9, fs * 0.62)}px">${signed(i.change, 1)}</span>` : ""}` : "";
-      const tip = `${i.name} (${i.symbol})\n${price(i.price)} · ${signed(i.change, 2)} today\nMarket value ${money(i.cap)}`;
+      const label = t.w > 28 && t.h > 16 ? `<b style="font-size:${fs}px">${esc(i.symbol)}</b>${t.h > fs * 2.6 && t.w > 40 ? `<span style="font-size:${Math.max(9, fs * 0.62)}px">${signed(shown, yr ? 0 : 1)}</span>` : ""}` : "";
+      const tip = `${i.name} (${i.symbol})\n${price(i.price)} · ${signed(i.change, 2)} today · ${signed(i.ch1y)} in a year\nMarket value ${money(i.cap)}`;
       html += `<a class="tile" href="/stock/${encodeURIComponent(i.symbol)}" data-link data-tip="${esc(tip)}"
-        style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px;background:${heatColor(i.change)};color:${heatText(i.change)}">${small > 12 ? label : ""}</a>`;
+        style="left:${t.x}px;top:${t.y}px;width:${t.w}px;height:${t.h}px;background:${heatColor(tone)};color:${heatText(tone)}">${small > 12 ? label : ""}</a>`;
     }
     html += `</div>`;
   }
   box.innerHTML = html;
+  drawLegend();
   const n = d.sectors.reduce((a, s) => a + s.items.length, 0);
   const up = d.sectors.reduce((a, s) => a + s.items.filter((i) => (i.change ?? 0) > 0).length, 0);
   const when = new Date(d.asOf * 1000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });

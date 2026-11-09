@@ -8,6 +8,8 @@ and is the price right?
 
 ![Home page: index levels and S&P 500 heat map](docs/home.jpg)
 
+![Macro page: is the market expensive?](docs/macro.jpg)
+
 ![Scorecard](docs/scorecard.jpg)
 
 | The story in charts | Full financial statements |
@@ -16,8 +18,18 @@ and is the price right?
 
 ## Features
 
-- **Market home page:** S&P 500, Nasdaq, Dow and Russell 2000 levels with today's move, and a heat map
-  of the S&P 500, Nasdaq-100 or Dow 30 (box size = market value, color = today's change, grouped by sector).
+- **Market home page:** index levels, market breadth, your watchlist, a heat map of the S&P 500, Nasdaq-100 or
+  Dow 30 (today or 1 year, grouped by sector), top movers, unusual volume and new highs.
+- **Macro ("Is the market expensive?"):** Buffett Indicator (market value to GDP), Shiller P/E, S&P 500 P/E, mean
+  reversion, earnings yield vs. bonds, an overall verdict, yield curve, Sahm Rule, VIX, junk spreads, consumer
+  sentiment and key economic data, with up to 155 years of history and recession shading.
+- **Assets:** Bitcoin and other crypto, gold, silver and other metals, oil, farm goods, currencies, sector funds and
+  global markets, with returns over every period, comparison charts, and ratios such as gold/silver and Bitcoin in gold.
+- **Screener:** about 2,500 US-listed companies with filters, presets, sortable columns and CSV export.
+- **Compare:** up to five stocks side by side, with the best value on each line highlighted.
+- **Earnings calendar** and a **portfolio tracker** (kept only in your browser).
+- **Deeper stock pages:** price action (trend, RSI, moving averages), what $10,000 would be worth vs. the S&P 500,
+  Piotroski and Altman scores, industry peers, what's priced in, and what's inside ETFs.
 - **8-point scorecard**: growing sales, profitable, generates cash, uses capital well (ROIC),
   solid balance sheet, fairly priced vs. its own P/E history, rewards shareholders, analysts see upside.
   Each check comes with a one-sentence explanation.
@@ -79,11 +91,14 @@ historical P/E is in a sensible range.
   and split normalization. Downloads are cached in `.cache/`.
 - `company.py`: company details for the Forecast, Fair value, Ownership, Dividends and Company tabs
   (`/api/company/{ticker}`), plus recent SEC filings from `sec.py`.
-- `market.py`: home page data (`/api/market/summary`, `/api/market/heatmap/{index}`): index members from
-  Wikipedia and Nasdaq, market caps and daily moves from Yahoo's screener.
+- `market.py`: index levels, heat map, screener, movers, earnings calendar and peers: index members from
+  Wikipedia and Nasdaq, market data from Yahoo's screener.
+- `macro.py`: market valuation, recession and sentiment gauges (FRED, multpl.com/Shiller, Yahoo).
+- `assets.py`: crypto, commodities, currencies and funds (Yahoo).
+- `scores.py`: Piotroski and Altman scores and total returns.
 - `rows.py`: every statement and ratio line, with its label, data source or formula, and plain-English
   description.
-- `static/`: the single-page frontend (vanilla JS and Chart.js); `company.js` holds the company tabs and `market.js` the home page.
+- `static/`: the single-page frontend (vanilla JS and Chart.js); `company.js` holds the company tabs, `market.js` the home page and `pages.js` the other pages.
 
 ## Data and limitations
 
@@ -95,6 +110,7 @@ historical P/E is in a sensible range.
 - Total Debt from SEC filings counts loans and bonds but not operating leases, so it can be lower than
   Yahoo's figure.
 - Quarterly ratios that need a full year of earnings are annualized (×4).
+- Yahoo, multpl.com and Nasdaq's list are used for personal research. A public deployment would need licensed data.
 
 ## Disclaimer
 

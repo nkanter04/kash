@@ -169,3 +169,9 @@ def test_index_summary():
     rows = market.summary()
     assert [r["label"] for r in rows] == ["S&P 500", "Nasdaq", "Dow Jones", "Russell 2000"]
     assert all(r["price"] > 0 and len(r["spark"]) >= 15 for r in rows)
+
+
+@pytest.mark.parametrize("ticker", ["AAPL", "JPM", "GOOGL", "KO"])
+def test_normal_companies_are_not_flagged_as_merged(stocks, ticker):
+    d = stocks(ticker)
+    assert "dataConflict" not in d["info"] and d["scorecard"]

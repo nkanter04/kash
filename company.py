@@ -253,6 +253,32 @@ def fair_value_inputs(info: dict, fc: dict | None) -> dict:
 
 # ------------------------------------------------------------------ everything
 
+SECTOR_NAMES = {"realestate": "Real estate", "consumer_cyclical": "Consumer discretionary", "basic_materials": "Materials",
+                "consumer_defensive": "Consumer staples", "technology": "Technology", "communication_services": "Communication services",
+                "financial_services": "Financials", "utilities": "Utilities", "industrials": "Industrials", "energy": "Energy", "healthcare": "Health care"}
+
+
+def fund(t: yf.Ticker) -> dict | None:
+    """What an ETF holds and what it costs."""
+    f = t.funds_data
+    holdings = [] if f.top_holdings is None else [
+        {"symbol": str(s), "name": r.get("Name"), "weight": _num(r.get("Holding Percent"))} for s, r in f.top_holdings.iterrows()]
+    sectors = sorted(({"name": SECTOR_NAMES.get(k, k.replace("_", " ").title()), "weight": _num(v)} for k, v in (f.sector_weightings or {}).items() if v),
+                     key=lambda x: -x["weight"])
+    ops = f.fund_operations
+    col = ops.columns[0] if ops is not None and not ops.empty else None
+    cell = lambda name, c: _num(ops.at[name, c]) if c is not None and name in ops.index else None
+    assets = f.asset_classes or {}
+    over = f.fund_overview or {}
+    if not holdings and not sectors:
+        return None
+    net = _num(t.info.get("totalAssets"))
+    return {"holdings": holdings, "sectors": sectors, "maxHolding": max([h["weight"] or 0 for h in holdings], default=1),
+            "maxWeight": max([s["weight"] for s in sectors], default=1), "category": over.get("categoryName"), "family": over.get("family"),
+            "expense": cell("Annual Report Expense Ratio", col), "categoryExpense": cell("Annual Report Expense Ratio", "Category Average") if ops is not None and "Category Average" in ops.columns else None,
+            "assets": net, "stocks": _num(assets.get("stockPosition")), "bonds": _num(assets.get("bondPosition"))}
+
+
 def company_data(ticker: str) -> dict:
     t = yf.Ticker(ticker)
     info = _safe(lambda: t.info) or {}
@@ -266,4 +292,5 @@ def company_data(ticker: str) -> dict:
         "ownership": _safe(lambda: ownership(t)),
         "dividends": _safe(lambda: dividends(t, info)),
         "fairValue": fair_value_inputs(info, fc),
+        "fund": _safe(lambda: fund(t)) if info.get("quoteType") == "ETF" else None,
     }

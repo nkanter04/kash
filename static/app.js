@@ -1,7 +1,7 @@
 /* Kash frontend: plain JS + Chart.js. */
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
-const state = { data: null, tab: "overview", stmt: "income", period: "annual", range: "1Y", charts: [] };
+const state = { data: null, tab: "overview", stmt: "income", period: "annual", range: "1Y", ma: false, charts: [] };
 const cache = {};
 
 /* ------------------------------------------------------------ theme */
@@ -15,7 +15,7 @@ $("#themeBtn").onclick = () => {
   const next = dark ? "light" : "dark";
   applyTheme(next);
   try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
-  if (state.data) renderStock();
+  if (state.data) renderStock(); else route();
 };
 function isDark() {
   const t = document.documentElement.dataset.theme;
@@ -65,6 +65,7 @@ function fmt(v, f) {
     default: return money(v);
   }
 }
+function medianOf(a) { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null; }
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 /* ------------------------------------------------------------ routing */
@@ -75,10 +76,17 @@ document.addEventListener("click", (e) => {
   if (a) { e.preventDefault(); go(a.getAttribute("href")); }
 });
 function route() {
-  const m = location.pathname.match(/^\/stock\/([^/]+)/i);
+  const path = location.pathname.replace(/\/$/, "") || "/";
+  document.querySelectorAll("#mainnav a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === path));
+  const m = path.match(/^\/stock\/([^/]+)/i);
   if (m) loadStock(decodeURIComponent(m[1]).toUpperCase());
+  else if (PAGES[path]) PAGES[path]();
   else renderHome();
 }
+// "/" jumps to search from anywhere (unless already typing)
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { e.preventDefault(); $("#q").focus(); $("#q").select(); }
+});
 
 /* ------------------------------------------------------------ search */
 const q = $("#q"), sug = $("#suggest");
@@ -146,6 +154,7 @@ async function loadStock(ticker) {
 function renderStock() {
   destroyCharts();
   const d = state.data, i = d.info;
+  rememberRecent(d.ticker);
   CUR = i.financialCurrency || i.currency || "USD";
   document.title = `${d.ticker} · ${i.shortName || i.longName || ""} · Kash`;
   const chg = i.regularMarketChange, chgp = i.regularMarketChangePercent;
@@ -162,9 +171,9 @@ function renderStock() {
       <div class="ident">
         <div class="logo">${esc((d.ticker || "?")[0])}</div>
         <div>
-          <h1>${esc(i.longName || i.shortName || d.ticker)}</h1>
+          <h1>${esc(i.longName || i.shortName || d.ticker)} ${starBtn(d.ticker, "big")}</h1>
           <div class="tags"><span class="tag"><b>${esc(d.ticker)}</b> · ${esc(i.fullExchangeName || i.exchange || "")}</span>
-            ${i.sector ? `<span class="tag">${esc(i.sector)}</span>` : ""}${i.industry ? `<span class="tag">${esc(i.industry)}</span>` : ""}</div>
+            ${i.sector ? `<span class="tag">${esc(i.sector)}</span>` : ""}${i.industry ? `<span class="tag">${esc(i.industry)}</span>` : ""}<a class="tag link" href="/compare?t=${encodeURIComponent(d.ticker)}" data-link>Compare ⇄</a></div>
         </div>
       </div>
       <div class="price">
@@ -174,15 +183,16 @@ function renderStock() {
       </div>
     </div>
     <div class="card stats">
-      ${stat("Market cap", money(i.marketCap))}
-      ${stat("P/E ratio", mult(i.trailingPE), "Price ÷ last 12 months' earnings per share.")}
-      ${stat("Forward P/E", mult(i.forwardPE), "Price ÷ analysts' estimate of next year's earnings per share.")}
+      ${stat("Market cap", i.dataConflict ? "–" : money(i.marketCap))}
+      ${stat("P/E ratio", i.dataConflict ? "–" : mult(i.trailingPE), "Price ÷ last 12 months' earnings per share.")}
+      ${stat("Forward P/E", i.dataConflict ? "–" : mult(i.forwardPE), "Price ÷ analysts' estimate of next year's earnings per share.")}
       ${stat("Dividend yield", dy ? pct(dy, 2) : "None")}
       ${stat("Beta", i.beta != null ? i.beta.toFixed(2) : "–", "How much the stock swings vs. the market. 1 = same as the market; above 1 = bumpier.")}
       <div class="stat"><div class="k">52-week range</div>
         <div class="range"><i style="left:${pos}%"></i></div>
         <div class="range-l num"><span>${pxStr(lo)}</span><span>${pxStr(hi)}</span></div></div>
     </div>
+    ${i.dataConflict ? conflictBanner(d) : ""}
     <nav class="tabs">
       ${[["overview", "Overview"], ["financials", "Financials"], ...Object.entries(COMPANY_TABS).map(([k, [label]]) => [k, label])]
         .map(([k, label]) => `<button class="tab ${state.tab === k ? "on" : ""}" data-tab="${k}">${label}</button>`).join("")}
@@ -195,6 +205,14 @@ function renderStock() {
   else if (state.tab === "financials") renderFinancials();
   else if (COMPANY_TABS[state.tab]) renderCompanyTab(state.tab, COMPANY_TABS[state.tab][1]);
   else { state.tab = "overview"; renderOverview(); }
+}
+function conflictBanner(d) {
+  const c = d.info.dataConflict, who = c.name ? esc(c.name.replace(/\.$/, "")) : "this company";
+  const was = c.formerName ? ` It was called ${esc(c.formerName)} until ${esc(new Date(c.renamed + "T12:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }))}.` : "";
+  return `<div class="alert"><b>Recent merger or ticker change: some numbers aren't available.</b>
+    SEC filings and Yahoo Finance report different results for ${esc(d.ticker)}, which usually means companies recently merged.
+    The SEC filer is ${who}.${was} Kash is showing that filer's annual history only, and has hidden quarterly results, the scorecard,
+    market cap, P/E and fair value. Analyst forecasts may mix the old companies.</div>`;
 }
 const stat = (k, v, tip) => `<div class="stat"><div class="k">${k}${tip ? info(tip) : ""}</div><div class="v num">${v}</div></div>`;
 const info = (t) => `<span class="info" data-tip="${esc(t)}">i</span>`;
@@ -236,8 +254,12 @@ function renderOverview() {
           <div class="seg" id="ranges">${["1D", "1W", "1M", "6M", "YTD", "1Y", "5Y", "10Y", "Max"].map((r) => `<button data-r="${r}" class="${r === state.range ? "on" : ""}">${r}</button>`).join("")}</div>
         </div>
         <div class="chart-box tall" style="margin-top:14px"><canvas id="cPrice"></canvas></div>
+        <label class="ma-toggle" data-tip="50- and 200-day moving averages. Shown on the 6M range and longer."><input type="checkbox" id="maToggle" ${state.ma ? "checked" : ""}> Show moving averages</label>
       </div>
     </section>
+
+    ${stockInsights(d)}
+    <div id="peersBox"></div>
 
     ${hasFin ? `<section>
       <h2>The story in charts</h2><p class="sub">Four questions every investor should ask, answered with the company's own numbers.</p>
@@ -285,8 +307,72 @@ function renderOverview() {
     $("#ranges").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
     drawPrice();
   };
+  $("#maToggle").onchange = (e) => { state.ma = e.target.checked; drawPrice(); };
   drawPrice();
+  loadPeers(d);
+  if (i.quoteType === "ETF") loadFund(d);
   if (hasFin) { drawGrowth(); drawMargins(); drawCash(); drawHealth(); drawPE(); }
+}
+
+/* ---- technical snapshot, total return and quality scores */
+function technicals(d) {
+  const c = d.prices.map((p) => p[1]), n = c.length;
+  if (n < 210) return null;
+  const last = c[n - 1], avg = (k) => c.slice(n - k).reduce((a, b) => a + b, 0) / k;
+  const ma50 = avg(50), ma200 = avg(200);
+  let up = 0, down = 0;
+  for (let k = n - 14; k < n; k++) { const ch = c[k] - c[k - 1]; if (ch > 0) up += ch; else down -= ch; }
+  const rsi = down ? 100 - 100 / (1 + up / down) : 100;
+  const year = c.slice(-252);
+  let peak = year[0], dd = 0;
+  for (const v of year) { peak = Math.max(peak, v); dd = Math.min(dd, v / peak - 1); }
+  const rets = c.slice(-31).map((v, k, a) => (k ? Math.log(v / a[k - 1]) : null)).slice(1);
+  const mean = rets.reduce((a, b) => a + b, 0) / rets.length;
+  const vol = Math.sqrt(rets.reduce((a, b) => a + (b - mean) ** 2, 0) / (rets.length - 1)) * Math.sqrt(252);
+  return { last, ma50, ma200, rsi, dd, vol };
+}
+function stockInsights(d) {
+  const t = technicals(d), q = d.quality || {}, r = d.returns || [];
+  const p = q.piotroski, a = q.altman;
+  const trend = t ? (t.last > t.ma50 && t.ma50 > t.ma200 ? ["Uptrend", "good", "Price is above its 50-day average, which is above its 200-day average."]
+    : t.last < t.ma50 && t.ma50 < t.ma200 ? ["Downtrend", "bad", "Price is below its 50-day average, which is below its 200-day average."]
+    : ["Mixed trend", "neutral", "Short- and long-term averages disagree, so there's no clear trend."]) : null;
+  const rsiWord = t ? (t.rsi >= 70 ? "overbought" : t.rsi <= 30 ? "oversold" : "neutral") : "";
+  const techCard = t ? `<div class="card"><div class="row-between"><h3>Price action</h3><span class="badge tone-${trend[1]}">${trend[0]}</span></div>
+    <div class="pills">${pill("vs 50-day", signed(t.last / t.ma50 - 1), "average price")}${pill("vs 200-day", signed(t.last / t.ma200 - 1), "average price")}${pill("RSI (14)", t.rsi.toFixed(0), rsiWord)}${pill("Worst drop", pct(-t.dd, 0), "in the past year")}${pill("Volatility", pct(t.vol, 0), "yearly, recent")}</div>
+    <div class="takeaway">${trend[2]}</div></div>` : "";
+  const retCard = r.length ? `<div class="card"><h3>What $10,000 would be worth</h3><p class="muted" style="margin:2px 0 10px">With dividends reinvested, against the S&P 500.</p>
+    <div class="tbl-wrap flat"><table class="plain"><thead><tr><th class="l">Invested</th><th>Value now</th><th>Per year</th><th>S&P 500 per year</th></tr></thead><tbody>
+    ${r.map((x) => `<tr><td class="l">${x.period === "Since listing" ? x.period : x.period.replace("Y", (m) => " year" + (x.period === "1Y" ? "" : "s")) + " ago"}</td><td><b>$${x.value10k.toLocaleString()}</b></td><td class="${x.cagr >= (x.benchCagr ?? -9) ? "up" : "down"}">${signed(x.cagr)}</td><td>${x.benchCagr != null ? signed(x.benchCagr) : "–"}</td></tr>`).join("")}</tbody></table></div></div>` : "";
+  const scoreCard = p || a ? `<div class="card"><h3>Financial strength scores</h3><div class="grid g2 scoreg">
+    ${p ? `<div><div class="row-between"><span class="k" data-tip="Nine pass/fail tests of profitability, debt and efficiency, comparing the last two fiscal years. 7 or more is strong.">Piotroski score <span class="info">i</span></span><span class="badge tone-${p.tone}">${p.label}</span></div>
+      <div class="big-v num">${p.score}<small class="muted"> / 9</small></div><ul class="ticks">${p.tests.map((x) => `<li class="${x.pass ? "ok" : "no"}">${x.pass ? "✓" : "✕"} ${esc(x.name)}</li>`).join("")}</ul></div>` : ""}
+    ${a ? `<div><div class="row-between"><span class="k" data-tip="Estimates bankruptcy risk from five balance-sheet ratios. Above 3 is safe, below 1.8 is distressed.">Altman Z-score <span class="info">i</span></span><span class="badge tone-${a.tone}">${a.label}</span></div>
+      <div class="big-v num">${a.score.toFixed(2)}</div><p class="muted small">Above 3.0 has meant low bankruptcy risk; below 1.8, high risk. Works best for manufacturers and other non-financial companies.</p></div>` : ""}
+    </div></div>` : "";
+  if (!techCard && !retCard && !scoreCard) return "";
+  return `<section><div class="grid g2">${techCard}${retCard}</div>${scoreCard ? `<div style="margin-top:18px">${scoreCard}</div>` : ""}</section>`;
+}
+async function loadFund(d) {
+  let c;
+  try { c = await loadCompany(d.ticker); } catch { return; }
+  const f = c.fund;
+  if (!f || state.data !== d || state.tab !== "overview" || !$("#peersBox")) return;
+  const bar = (name, w) => `<div class="wbar"><span>${esc(name)}</span><i style="width:${Math.min(100, w * 100 / (f.maxWeight || 1))}%"></i><b class="num">${pct(w, 1)}</b></div>`;
+  $("#peersBox").innerHTML = `<section><h2>What's inside this fund</h2><p class="sub">${[f.category, f.family].filter(Boolean).map(esc).join(" · ")}</p>
+    <div class="pills">${f.expense != null ? pill("Yearly fee", pct(f.expense, 2), f.categoryExpense != null ? "category average " + pct(f.categoryExpense, 2) : "") : ""}${f.assets != null ? pill("Fund size", money(f.assets, 1), "") : ""}${f.stocks != null ? pill("In stocks", pct(f.stocks, 0), "") : ""}${f.bonds ? pill("In bonds", pct(f.bonds, 0), "") : ""}</div>
+    <div class="grid g2" style="margin-top:14px">
+      ${f.holdings.length ? `<div class="card"><h3>Largest holdings</h3>${f.holdings.map((h) => `<div class="wbar"><span><a href="/stock/${encodeURIComponent(h.symbol)}" data-link>${esc(h.symbol)}</a> <small class="muted">${esc(h.name)}</small></span><i style="width:${Math.min(100, h.weight * 100 / (f.maxHolding || 1))}%"></i><b class="num">${pct(h.weight, 1)}</b></div>`).join("")}</div>` : ""}
+      ${f.sectors.length ? `<div class="card"><h3>Sectors</h3>${f.sectors.map((s) => bar(s.name, s.weight)).join("")}</div>` : ""}
+    </div></section>`;
+}
+async function loadPeers(d) {
+  let p;
+  try { p = await (await fetch("/api/peers/" + encodeURIComponent(d.ticker))).json(); } catch { return; }
+  if (state.data !== d || state.tab !== "overview" || !p.rows || p.rows.length < 2 || !$("#peersBox")) return;
+  $("#peersBox").innerHTML = `<section><div class="row-between"><div><h2>How it compares</h2><p class="sub">Largest companies in ${esc(p.basis)}.</p></div><a class="btn" href="/compare?t=${p.rows.slice(0, 5).map((r) => r.symbol).join(",")}" data-link>Compare side by side</a></div>
+    <div class="tbl-wrap"><table class="plain"><thead><tr><th class="l">Company</th><th>Market cap</th><th>Today</th><th>P/E</th><th>Fwd P/E</th><th>Yield</th><th>1Y</th><th>Analysts</th></tr></thead><tbody>
+    ${p.rows.map((r) => `<tr class="${r.symbol === d.ticker ? "hl" : ""}"><td class="l co">${stockLink(r.symbol)}<div class="muted small nm">${esc(r.name || "")}</div></td><td>${money(r.cap, 1)}</td>${chgCell(r.change)}<td>${n2(r.pe)}</td><td>${n2(r.fpe)}</td><td>${r.div ? pct(r.div, 2) : "–"}</td>${chgCell(r.ch1y)}<td>${ratingText(r.rating)}</td></tr>`).join("")}</tbody></table></div></section>`;
 }
 
 function priceIn(v, i) { const c = CUR; CUR = i.currency || "USD"; const s = price(v); CUR = c; return s; }
@@ -358,9 +444,9 @@ function peTake() {
   if (!pe) return "";
   const hist = pe.values.slice(1, CHART_YEARS + 1).filter((v) => v != null), now = pe.values[0];
   if (!hist.length || now == null) return "";
-  const avg = hist.reduce((a, b) => a + b, 0) / hist.length;
+  const avg = medianOf(hist);
   const diff = now / avg - 1;
-  return `Now <b>${mult(now)}</b> vs. a ${hist.length}-year average of <b>${mult(avg)}</b>: ` +
+  return `Now <b>${mult(now)}</b> vs. a ${hist.length}-year median of <b>${mult(avg)}</b>: ` +
     (diff < -0.05 ? `about ${pct(-diff, 0)} cheaper than usual.` : diff > 0.05 ? `about ${pct(diff, 0)} pricier than usual.` : "right around its normal level.");
 }
 
@@ -491,6 +577,19 @@ function plotPrice(s, base, rng, tz, baseIsPrevClose, sess = null) {
   const datasets = [{ data: xy, borderColor: col, borderWidth: 2, pointRadius: 0, fill: true, tension: intraday ? 0 : 0.15,
     segment: sess ? { borderColor: (c) => (sess[c.p1DataIndex] !== "r" ? col + "88" : undefined) } : undefined,
     backgroundColor: (ctx) => { const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height); g.addColorStop(0, col + "33"); g.addColorStop(1, col + "00"); return g; } }];
+  if (state.ma && !intraday && rng !== "Max") {
+    const closes = d.prices;
+    for (const [n, col2] of [[50, css("--c3")], [200, css("--c2")]]) {
+      const data = [];
+      let sum = 0;
+      closes.forEach((p, k) => {
+        sum += p[1];
+        if (k >= n) sum -= closes[k - n][1];
+        if (k >= n - 1 && p[0] >= s[0][0]) data.push({ x: p[0], y: sum / n });
+      });
+      datasets.push({ label: n + "-day average", data, borderColor: col2, borderWidth: 1.4, pointRadius: 0, fill: false, tension: 0 });
+    }
+  }
   if (rng === "1D" && baseIsPrevClose) {
     datasets.push({ label: "Previous close", data: [{ x: 0, y: base }, { x: s.length - 1, y: base }], borderColor: css("--ink-3"),
       borderWidth: 1, borderDash: [4, 4], pointRadius: 0, fill: false });
@@ -501,7 +600,7 @@ function plotPrice(s, base, rng, tz, baseIsPrevClose, sess = null) {
     data: { datasets },
     plugins: [sessionBands],
     options: baseOpts({
-      plugins: { ...baseOpts().plugins, legend: { display: false }, sessionBands: { sessions: sess },
+      plugins: { ...baseOpts().plugins, legend: { display: state.ma && !intraday && rng !== "Max", position: "bottom", labels: { usePointStyle: true, boxWidth: 8, padding: 14, filter: (l) => l.datasetIndex > 0 } }, sessionBands: { sessions: sess },
         tooltip: { ...baseOpts().plugins.tooltip, filter: (it) => it.datasetIndex === 0,
           callbacks: { title: (it) => fmt(timeOf(it[0].parsed.x), tipFmt),
             label: (it) => priceIn(it.parsed.y, i) + (sess && SESSION_NAME[sess[it.dataIndex]] ? " · " + SESSION_NAME[sess[it.dataIndex]] : "") } } },

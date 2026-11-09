@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import os
+import statistics
 import threading
 import time
 from pathlib import Path
@@ -18,11 +19,15 @@ import yfinance as yf
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import assets as asset_data
 import company
+import macro
 import market
+import scores
 import sec
 from rows import BALANCE_ROWS, CASHFLOW_ROWS, INCOME_ROWS, RATIO_ROWS
 
@@ -34,12 +39,22 @@ _lock = threading.Lock()
 PID_FILE = Path(__file__).parent / ".cache" / "server.pid"
 
 
+def _warm_caches():
+    """Load the slow shared datasets in the background so the first visitor doesn't wait."""
+    for job in (market.quotes_all, asset_data.frame, macro.overview):
+        try:
+            job()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 @asynccontextmanager
 async def lifespan(_app):
     """Record the serving process's PID so stop-kash.ps1 can stop it (with --reload it's a child process
     whose command line doesn't mention uvicorn)."""
     PID_FILE.parent.mkdir(exist_ok=True)
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    threading.Thread(target=_warm_caches, daemon=True).start()
     yield
     try:
         if PID_FILE.read_text(encoding="utf-8").strip() == str(os.getpid()):
@@ -49,6 +64,7 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Kash", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=2000)
 
 
 @app.middleware("http")
@@ -283,8 +299,34 @@ def merge_sec(sec_df: pd.DataFrame | None, yahoo_df: pd.DataFrame | None) -> pd.
     return out[sorted(out.columns, reverse=True)]
 
 
-def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_frames=None) -> dict:
-    if period == "annual":
+def source_conflict(sec_income: pd.DataFrame | None, yahoo_income: pd.DataFrame | None) -> bool:
+    """True when SEC and Yahoo are describing different companies, as can happen for a while after a merger
+    (SUPN in Nov 2026: the SEC filer was legacy Indivior, Yahoo still had legacy Supernus).
+
+    Compares the latest fiscal year both have. Revenue AND diluted shares must both be >25% apart: revenue alone
+    differs by definition for banks and insurers, and shares alone differ for odd share classes.
+    """
+    if sec_income is None or sec_income.empty or yahoo_income is None or yahoo_income.empty:
+        return False
+    for sc in sorted(sec_income.columns, reverse=True):
+        near = [yc for yc in yahoo_income.columns if abs((sc - yc).days) <= 20]
+        if not near:
+            continue
+        pairs = [(get(sec_income, n, sc), get(yahoo_income, n, near[0])) for n in ("Total Revenue", "Diluted Average Shares")]
+        if any(a is None or b is None or a <= 0 or b <= 0 for a, b in pairs):
+            continue
+        return all(max(a, b) / min(a, b) > 1.25 for a, b in pairs)
+    return False
+
+
+EMPTY_STATEMENTS = {"columns": [], "income": [], "balance": [], "cashflow": [], "ratios": []}
+
+
+def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_frames=None, conflict=False) -> dict:
+    if period == "annual" and conflict:   # SEC and Yahoo disagree about who this is: use the SEC filer alone
+        inc, bal, cf = sec_frames
+        inc_ttm = cf_ttm = None
+    elif period == "annual":
         inc, bal, cf = t.income_stmt, t.balance_sheet, t.cashflow
         if sec_frames:
             inc, bal, cf = (merge_sec(a, b) for a, b in zip(sec_frames, (inc, bal, cf)))
@@ -311,13 +353,13 @@ def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_fra
     bal_cols = make_columns(bal, period, None, bal_keep) if bal_keep else []
 
     # balance sheet for TTM column = latest quarter balance sheet
-    qbal = t.quarterly_balance_sheet if period == "annual" else bal
-    latest_q = qbal.columns[0] if qbal is not None and not qbal.empty else None
+    qbal = bal if conflict else t.quarterly_balance_sheet if period == "annual" else bal
+    latest_q = (max(qbal.columns) if conflict else qbal.columns[0]) if qbal is not None and not qbal.empty else None
 
     # prices are quoted per listed share in the trading currency; statements may differ (ADRs)
     stmt_shares = (get(qbal, ["Ordinary Shares Number", "Share Issued"], latest_q) if latest_q is not None else None) \
         or get(inc, ["Diluted Average Shares", "Basic Average Shares"], inc.columns.max())
-    basis = PriceBasis(info, stmt_shares)
+    basis = PriceBasis(info, stmt_shares if not conflict else None)
 
     ctx = {"period": period, "info": info}
     income = build_table(INCOME_ROWS, {}, inc_cols, ctx)
@@ -333,7 +375,8 @@ def statements(t: yf.Ticker, prices: PriceBook, info: dict, period: str, sec_fra
     for c in src_cols:
         date = c["date"]
         if date is None:  # TTM -> live price & latest balance sheet
-            price = basis.convert(clean(info.get("currentPrice") or info.get("regularMarketPrice")))
+            # after a merger today's price and the old filer's statements don't belong together
+            price = None if conflict else basis.convert(clean(info.get("currentPrice") or info.get("regularMarketPrice")))
             bget = (lambda s, col=latest_q: get(qbal, s, col)) if latest_q is not None else (lambda s: None)
             if c.get("_cf"):
                 cget = c["_cf"]
@@ -468,11 +511,11 @@ def scorecard(fin: dict, info: dict) -> list[dict]:
     pe_hist = [v for v in pe_all[1:11] if v is not None and v > 0]  # skip "Current"; last 10 years
     pe_now = info.get("trailingPE")
     if pe_now and pe_hist:
-        avg = sum(pe_hist) / len(pe_hist)
+        avg = statistics.median(pe_hist)   # a median: one year of tiny earnings shouldn't define "normal"
         checks.append({
             "key": "value", "title": "Fairly priced",
             "pass": pe_now <= avg * 1.05, "value": pe_now, "fmt": "x",
-            "text": f"Trades at {pe_now:.1f}× earnings vs. its {len(pe_hist)}-year average of {avg:.1f}×."
+            "text": f"Trades at {pe_now:.1f}× earnings vs. its {len(pe_hist)}-year median of {avg:.1f}×."
                     + (" Cheaper than usual." if pe_now < avg * 0.95 else (" About its normal price." if pe_now <= avg * 1.05 else " Pricier than usual.")),
         })
 
@@ -560,6 +603,24 @@ def extended_quote(info: dict) -> dict | None:
             "time": int(t * 1000) if t else None}
 
 
+def _stock_extras(hist: pd.DataFrame, annual: dict, info: dict, conflict: bool) -> dict:
+    """Quality scores and total return. Each is optional: a failure just hides that card."""
+    out: dict = {"quality": {}, "returns": []}
+    if annual.get("income") and not conflict:
+        try:
+            # both scores were built for industrial companies; bank balance sheets don't fit them
+            if info.get("sector") != "Financial Services":
+                out["quality"] = {"piotroski": scores.piotroski(annual), "altman": scores.altman(annual, info.get("sector"))}
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        if "Adj Close" in hist:
+            out["returns"] = scores.total_returns(hist["Adj Close"], market.spy_adjusted())
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
 def load(ticker: str) -> dict:
     ticker = ticker.upper().strip()
     with _lock:
@@ -596,16 +657,24 @@ def load(ticker: str) -> dict:
         sec_frames = sec.annual_frames(ticker, splits=prices.splits)
     except Exception:  # noqa: BLE001  (SEC is a bonus; never break the page over it)
         sec_frames = None
-    annual = statements(t, prices, info, "annual", sec_frames)
-    annual["source"] = "SEC EDGAR 10-K filings + Yahoo Finance" if sec_frames else "Yahoo Finance"
-    quarterly = statements(t, prices, info, "quarterly")
+    conflict = bool(sec_frames) and source_conflict(sec_frames[0], t.income_stmt)
+    if conflict:
+        try:
+            info["dataConflict"] = sec.filer_info(ticker)
+        except Exception:  # noqa: BLE001
+            info["dataConflict"] = {}
+    annual = statements(t, prices, info, "annual", sec_frames, conflict=conflict)
+    annual["source"] = ("SEC EDGAR 10-K filings" if conflict else "SEC EDGAR 10-K filings + Yahoo Finance") if sec_frames else "Yahoo Finance"
+    extras = _stock_extras(hist, annual, info, conflict)
+    quarterly = {**EMPTY_STATEMENTS, "source": "SEC EDGAR 10-K filings (annual only)"} if conflict else statements(t, prices, info, "quarterly")
 
     data = {
         "ticker": ticker,
         "info": info,
         "prices": price_series,
         "financials": {"annual": annual, "quarterly": quarterly},
-        "scorecard": scorecard(annual, info) if annual["income"] else [],
+        "scorecard": scorecard(annual, info) if annual["income"] and not conflict else [],
+        **extras,
         "updated": int(time.time()),
     }
     with _lock:
@@ -698,6 +767,58 @@ def company_info(ticker: str):
     return data
 
 
+def _safe(fn, what):
+    try:
+        return fn()
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not load {what}: {e}")
+
+
+@app.get("/api/market/screener")
+def market_screener():
+    return _safe(market.screener, "the screener")
+
+
+@app.get("/api/quotes")
+def stock_quotes(symbols: str):
+    return _safe(lambda: market.quotes([s.strip().upper() for s in symbols.split(",") if s.strip()]), "quotes")
+
+
+@app.get("/api/market/movers")
+def market_movers():
+    return _safe(market.movers, "market movers")
+
+
+@app.get("/api/market/earnings")
+def market_earnings():
+    return _safe(market.earnings_calendar, "the earnings calendar")
+
+
+@app.get("/api/peers/{ticker}")
+def stock_peers(ticker: str):
+    return _safe(lambda: market.peers(ticker.upper().strip()), "peers")
+
+
+@app.get("/api/macro")
+def macro_overview():
+    return _safe(macro.overview, "macro data")
+
+
+@app.get("/api/assets")
+def assets_table():
+    return _safe(asset_data.table, "asset prices")
+
+
+@app.get("/api/assets/{symbol}/history")
+def asset_history(symbol: str):
+    d = _safe(lambda: asset_data.history(symbol), "asset history")
+    if d is None:
+        raise HTTPException(404, f"Unknown asset '{symbol}'.")
+    return d
+
+
 @app.get("/api/market/summary")
 def market_summary():
     """Major index levels (S&P 500, Nasdaq, Dow, Russell 2000) with today's change."""
@@ -738,6 +859,12 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 @app.get("/")
+@app.get("/screener")
+@app.get("/compare")
+@app.get("/portfolio")
+@app.get("/earnings")
+@app.get("/macro")
+@app.get("/assets")
 @app.get("/stock/{ticker}")
 def index(ticker: str | None = None):
     return FileResponse(STATIC / "index.html")

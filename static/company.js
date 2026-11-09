@@ -132,7 +132,7 @@ function fvDefaults(c, d, mode) {
   const growth = candidates.length ? clamp(Math.min(...candidates), 0, 0.2) : 0.05;
   const past = annualSeries("ratios", mode === "eps" ? "pe" : "pfcf").map((x) => x.v).filter((v) => v != null && v > 0 && v < 200);
   const now = mode === "eps" ? i.trailingPE : (base > 0 ? i.currentPrice / base : null);
-  const pastAvg = avgOf(past);
+  const pastAvg = medianOf(past);
   const multiple = clamp(Math.round(Math.min(...[pastAvg, now].filter((v) => v != null && v > 0), 25)), 8, 35);
   return { base, growth, multiple, ret: 0.1, years: 5, hist, histYears, analyst: fv.analystGrowth, pastAvg, pastN: past.length, now };
 }
@@ -140,6 +140,7 @@ function fvDefaults(c, d, mode) {
 const fvState = { mode: "eps", inputs: null, ticker: null };
 
 function renderFairValue(c, d) {
+  if (d.info.dataConflict) return empty("Fair value isn't available right now", "This company recently merged or changed tickers, so its earnings, cash flow and share count don't describe one business yet. The calculator will work again once combined results are reported.");
   const fv = c.fairValue || {};
   const eps = fv.eps > 0, fcf = fv.fcfPerShare > 0;
   if (!eps && !fcf) return empty("Can't estimate a fair value", "This calculator works from profits or free cash flow per share, and this company currently has neither (or it's a fund). Valuing a business that isn't profitable yet depends almost entirely on guesses about the far future.");
@@ -159,7 +160,7 @@ function renderFairValue(c, d) {
           <p class="muted" style="margin:8px 0 0">Starting point: <b>${pxOf(x.base)}</b> ${isEps ? "earnings per share (last 12 months)" : "free cash flow per share (last 12 months)"}.</p>
           ${slider("g", "Growth per year", x.growth, 0, 0.4, 0.005, (v) => pct(v, 1), src ? `Starts at the lower of: ${src} (capped at 20%).` : "No growth history, so it starts at 5%.")}
           ${slider("years", "Years", x.years, 3, 10, 1, (v) => v + " years", "How far ahead to project.")}
-          ${slider("multiple", `${m} at the end`, x.multiple, 5, 50, 1, (v) => v + "×", x.pastAvg ? `Starts at the lower of its ${x.pastN}-year average (${mult(x.pastAvg)}) and today's (${mult(x.now)}), capped at 25×.` : x.now ? `Starts at today's ${m} (${mult(x.now)}), capped at 25×.` : "What investors might pay for each $1 then.")}
+          ${slider("multiple", `${m} at the end`, x.multiple, 5, 50, 1, (v) => v + "×", x.pastAvg ? `Starts at the lower of its ${x.pastN}-year median (${mult(x.pastAvg)}) and today's (${mult(x.now)}), capped at 25×.` : x.now ? `Starts at today's ${m} (${mult(x.now)}), capped at 25×.` : "What investors might pay for each $1 then.")}
           ${slider("ret", "Return you want", x.ret, 0.04, 0.2, 0.005, (v) => pct(v, 1) + " a year", "The stock market has averaged roughly 10% a year over the long run.")}
           <button class="btn" id="fvReset" style="margin-top:6px">Reset to defaults</button>
         </div>
@@ -200,6 +201,7 @@ function drawFairValue(d) {
       <span class="muted">today's price is ${pxOf(px)} (${diff >= 0 ? "about " + pct(diff, 0) + " below" : "about " + pct(-diff, 0) + " above"} this estimate)</span></div>
     <div class="takeaway">If you buy at ${pxOf(px)} and these assumptions come true, you'd earn about <b class="${(irr ?? 0) >= x.ret ? "up" : "down"}">${irr != null ? pct(irr, 1) : "–"} a year</b>
       over ${x.years} years (before dividends), vs. the ${pct(x.ret, 1)} you asked for.</div>
+    <div class="takeaway"><b>What's priced in:</b> to earn your ${pct(x.ret, 1)} from today's price, ${fvState.mode === "eps" ? "earnings" : "free cash flow"} per share would have to grow about <b>${pct(Math.pow((px * Math.pow(1 + x.ret, x.years)) / (x.multiple * x.base), 1 / x.years) - 1, 1)} a year</b> for ${x.years} years.</div>
     <div class="pills">${cases.map(([n, v, g, mm]) => pill(n, pxOf(v), `${pct(g, 1)} growth · ${mm.toFixed(0)}× ${m}`)).join("")}</div>
     <div class="tbl-wrap" style="margin-top:14px"><table class="plain"><thead><tr><th class="l">Year</th><th>${fvState.mode === "eps" ? "EPS" : "FCF / share"}</th><th>Price at ${x.multiple}×</th></tr></thead><tbody>
       ${rows.map(([y, v]) => `<tr><td class="l">${new Date().getFullYear() + y}</td><td>${pxOf(v)}</td><td>${y === x.years ? "<b>" + pxOf(v * x.multiple) + "</b>" : "–"}</td></tr>`).join("")}

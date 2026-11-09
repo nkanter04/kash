@@ -125,18 +125,45 @@ def members(index: str) -> list[dict]:
 
 # ------------------------------------------------------------------ quotes
 
+def _rating(text) -> float | None:
+    """'2.3 - Buy' -> 2.3 (1 = strong buy, 5 = strong sell)."""
+    try:
+        return float(str(text).split(" ")[0])
+    except ValueError:
+        return None
+
+
+def _quote(x: dict) -> dict:
+    """One screener row. Careful with units: the *ChangePercent fields below are mixed (see the /100s)."""
+    ch52 = x.get("fiftyTwoWeekChangePercent")
+    return {
+        "cap": x.get("marketCap"), "change": x.get("regularMarketChangePercent"), "price": x.get("regularMarketPrice"),
+        "name": x.get("shortName") or x.get("longName"), "exchange": x.get("fullExchangeName"),
+        "pe": x.get("trailingPE"), "fpe": x.get("forwardPE"), "pb": x.get("priceToBook"),
+        "eps": x.get("epsTrailingTwelveMonths"), "div": x.get("trailingAnnualDividendYield"),
+        "ch1y": ch52 / 100 if ch52 is not None else None,
+        "ma50": x.get("fiftyDayAverageChangePercent"), "ma200": x.get("twoHundredDayAverageChangePercent"),
+        "fromHigh": x.get("fiftyTwoWeekHighChangePercent"), "fromLow": x.get("fiftyTwoWeekLowChangePercent"),
+        "vol": x.get("regularMarketVolume"), "avgVol": x.get("averageDailyVolume3Month"),
+        "rating": _rating(x.get("averageAnalystRating")) if x.get("averageAnalystRating") else None,
+        "earnings": x.get("earningsTimestamp"), "earningsEstimated": x.get("isEarningsDateEstimate"),
+    }
+
+
 def _universe() -> dict[str, dict]:
     """Market cap and today's % change for US stocks above ~$1B, largest first (a few screener calls)."""
     from yfinance import EquityQuery
-    q = EquityQuery("and", [EquityQuery("gt", ["intradaymarketcap", 1e9]), EquityQuery("eq", ["region", "us"])])
+    # listed on the major US exchanges only: otherwise foreign OTC lines crowd out real listings
+    q = EquityQuery("and", [EquityQuery("gt", ["intradaymarketcap", 1e9]), EquityQuery("eq", ["region", "us"]),
+                            EquityQuery("is-in", ["exchange", "NMS", "NYQ", "NGM", "NCM", "ASE", "PCX", "BTS"])])
     out, offset = {}, 0
     while True:
         r = yf.screen(q, sortField="intradaymarketcap", sortAsc=False, size=250, offset=offset)
         for x in r.get("quotes", []):
-            out[x["symbol"]] = {"cap": x.get("marketCap"), "change": x.get("regularMarketChangePercent"),
-                                "price": x.get("regularMarketPrice"), "name": x.get("shortName")}
+            if "OTC" not in (x.get("fullExchangeName") or ""):   # thinly traded foreign lines distort movers and screens
+                out[x["symbol"]] = _quote(x)
         offset += 250
-        if not r.get("quotes") or offset >= min(r.get("total", 0), 4000):
+        if not r.get("quotes") or offset >= min(r.get("total", 0), 6000):
             break
     return out
 
@@ -155,7 +182,7 @@ def heatmap(index: str) -> dict:
             continue
         change = q["change"] / 100 if q.get("change") is not None else None   # screener gives percent
         sectors.setdefault(m["sector"] or "Other", []).append(
-            {"symbol": m["symbol"], "name": m["name"], "cap": q["cap"], "change": change, "price": q.get("price")})
+            {"symbol": m["symbol"], "name": m["name"], "cap": q["cap"], "change": change, "price": q.get("price"), "ch1y": q.get("ch1y")})
     groups = []
     for name, items in sectors.items():
         items.sort(key=lambda x: -x["cap"])
@@ -166,6 +193,125 @@ def heatmap(index: str) -> dict:
                        "change": sum(x["cap"] * x["change"] for x in weighted) / wcap if wcap else None})
     groups.sort(key=lambda g: -g["cap"])
     return {"index": index, "label": INDEXES[index], "asOf": int(time.time()), "sectors": groups, "missing": missing}
+
+
+# ------------------------------------------------------------------ screener, movers, earnings, peers
+
+def _membership() -> dict[str, dict]:
+    """symbol -> {sector, industry, indexes} from the index member lists."""
+    out: dict[str, dict] = {}
+    for idx in INDEXES:
+        try:
+            for m in members(idx):
+                d = out.setdefault(m["symbol"], {"sector": m.get("sector"), "industry": m.get("industry"), "indexes": []})
+                d["indexes"].append(idx)
+                d["sector"] = d["sector"] or m.get("sector")
+                d["industry"] = d["industry"] or m.get("industry")
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def quotes_all() -> dict[str, dict]:
+    return _cached("universe", QUOTES_TTL, _universe)
+
+
+def _row(symbol: str, q: dict, m: dict | None) -> dict:
+    change = q["change"] / 100 if q.get("change") is not None else None
+    m = m or {}
+    return {**{k: v for k, v in q.items() if k not in ("change", "earningsEstimated")}, "symbol": symbol, "change": change,
+            "sector": m.get("sector"), "industry": m.get("industry"), "indexes": m.get("indexes", [])}
+
+
+def screener() -> dict:
+    mem = _membership()
+    rows = [_row(s, q, mem.get(s)) for s, q in quotes_all().items() if q.get("cap")]
+    rows.sort(key=lambda r: -r["cap"])
+    return {"rows": rows, "asOf": int(time.time())}
+
+
+def movers() -> dict:
+    """Home page panels: breadth and notable movers among US stocks above $2B (S&P 500 for breadth)."""
+    mem = _membership()
+    all_rows = [_row(s, q, mem.get(s)) for s, q in quotes_all().items() if q.get("cap") and q.get("change") is not None]
+    big = [r for r in all_rows if r["cap"] >= 2e9]
+    sp = [r for r in all_rows if "sp500" in r["indexes"]]
+
+    def top(rows, key, n=8, reverse=True):
+        return sorted(rows, key=lambda r: r[key], reverse=reverse)[:n]
+
+    def share(rows, f):
+        have = [r for r in rows if f(r) is not None]
+        return sum(1 for r in have if f(r)) / len(have) if have else None
+
+    unusual = [{**r, "volRatio": r["vol"] / r["avgVol"]} for r in big if r.get("vol") and r.get("avgVol") and r["avgVol"] > 200_000]
+    highs = [r for r in sp if r.get("fromHigh") is not None and r["fromHigh"] >= -0.01]
+    lows = [r for r in sp if r.get("fromLow") is not None and r["fromLow"] <= 0.01]
+    return {
+        "gainers": top(big, "change"), "losers": top(big, "change", reverse=False),
+        "unusual": top(unusual, "volRatio"),
+        "highs": sorted(highs, key=lambda r: -r["cap"])[:8], "lows": sorted(lows, key=lambda r: -r["cap"])[:8],
+        "breadth": {
+            "total": len(sp), "up": sum(1 for r in sp if r["change"] > 0), "down": sum(1 for r in sp if r["change"] < 0),
+            "above50": share(sp, lambda r: None if r.get("ma50") is None else r["ma50"] > 0),
+            "above200": share(sp, lambda r: None if r.get("ma200") is None else r["ma200"] > 0),
+            "newHighs": len(highs), "newLows": len(lows),
+        },
+        "asOf": int(time.time()),
+    }
+
+
+def earnings_calendar(days: int = 21) -> dict:
+    """Upcoming earnings for US stocks above $2B, grouped by day, biggest first."""
+    mem = _membership()
+    now, end = time.time() - 86400, time.time() + days * 86400
+    out: dict[str, list] = {}
+    for s, q in quotes_all().items():
+        t = q.get("earnings")
+        if not t or not now <= t <= end or (q.get("cap") or 0) < 2e9:
+            continue
+        day = pd.Timestamp(t, unit="s", tz="UTC").tz_convert("America/New_York").date().isoformat()
+        out.setdefault(day, []).append({**_row(s, q, mem.get(s)), "estimated": bool(q.get("earningsEstimated"))})
+    return {"days": [{"date": d, "rows": sorted(out[d], key=lambda r: -r["cap"])} for d in sorted(out)], "asOf": int(time.time())}
+
+
+def peers(symbol: str, n: int = 8) -> dict:
+    """Largest companies in the same GICS sub-industry (or sector when that's too small). S&P 500 + Nasdaq-100 only."""
+    mem, quotes = _membership(), quotes_all()
+    me = mem.get(symbol)
+    if not me or not me.get("sector"):
+        return {"basis": None, "rows": []}
+    same_ind = [s for s, m in mem.items() if me.get("industry") and m.get("industry") == me["industry"]]
+    pool, basis = (same_ind, me["industry"]) if len(same_ind) >= 4 else ([s for s, m in mem.items() if m.get("sector") == me["sector"]], me["sector"])
+    rows = [_row(s, quotes[s], mem[s]) for s in pool if s in quotes and quotes[s].get("cap")]
+    rows.sort(key=lambda r: -r["cap"])
+    chosen = rows[:n]
+    if symbol not in [r["symbol"] for r in chosen]:
+        chosen = [r for r in rows if r["symbol"] == symbol] + chosen[:n - 1]
+    return {"basis": basis, "rows": chosen}
+
+
+def quotes(symbols: list[str]) -> list[dict]:
+    """Current quotes for the watchlist. Anything outside the screener universe (funds, small caps) is fetched singly."""
+    mem, uni, out = _membership(), quotes_all(), []
+    for s in symbols[:60]:
+        if s in uni:
+            out.append(_row(s, uni[s], mem.get(s)))
+            continue
+        try:
+            i = yf.Ticker(s).fast_info
+            prev, last = i["previousClose"], i["lastPrice"]
+            out.append({"symbol": s, "name": s, "price": last, "change": last / prev - 1 if prev else None, "cap": None})
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def spy_adjusted() -> pd.Series:
+    """S&P 500 with dividends reinvested (SPY adjusted close), cached for 6 hours."""
+    def fetch():
+        return yf.Ticker("SPY").history(period="max", interval="1d", auto_adjust=False)["Adj Close"].dropna()
+    return _cached("spy_adj", 6 * 3600, fetch)
 
 
 def summary() -> list[dict]:

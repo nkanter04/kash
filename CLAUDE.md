@@ -1,8 +1,8 @@
 # Kash: notes for Claude
 
-Friendly stock analysis web app: FastAPI backend (`app.py`, `sec.py`, `rows.py`, `company.py`, `market.py`) and a vanilla JS
-single-page frontend (`static/app.js`; company tabs in `static/company.js`, home page in `static/market.js`;
-`index.html` calls `route()` after all three scripts load). Public repo: github.com/nkanter04/kash. See README.md for features.
+Friendly stock analysis web app: FastAPI backend (`app.py`, `sec.py`, `rows.py`, `company.py`, `market.py`, `macro.py`, `assets.py`, `scores.py`) and a vanilla JS
+single-page frontend (`static/app.js`; company tabs in `company.js`, home page in `market.js`, Screener/Compare/Earnings/
+Portfolio/Macro/Assets plus the watchlist in `pages.js`; `index.html` calls `route()` after all four scripts load). Public repo: github.com/nkanter04/kash. See README.md for features.
 
 ## Run and test
 
@@ -13,7 +13,9 @@ single-page frontend (`static/app.js`; company tabs in `static/company.js`, home
   log in `.cache/server.log`). Stop it with `stop-kash.ps1`/`.bat`: with `--reload` the process serving port 8050
   is a `spawn_main` child whose command line doesn't mention uvicorn, so the script also uses the PID the app
   writes to `.cache/server.pid` at startup. Restart it after stopping (run the .vbs) so the owner isn't left without it.
-- Tests: `.venv/Scripts/python -m pytest` runs everything (~20 s).
+- `--reload` can hang after several backend edits (the log says "Reloading" but the old worker keeps serving). If new
+  code doesn't take effect, restart: `stop-kash.ps1`, then launch `run-kash-hidden.vbs`.
+- Tests: `.venv/Scripts/python -m pytest` runs everything (~45 s).
   `-m "not network"` runs only the offline unit tests (~5 s); `-m network` runs only the live-data checks.
   Run the tests after any change to `app.py`, `sec.py` or `rows.py`.
 - Responses are cached in memory for 15 min per ticker, and SEC downloads on disk in `.cache/` (1 day for
@@ -34,7 +36,15 @@ single-page frontend (`static/app.js`; company tabs in `static/company.js`, home
 - **Total Debt (SEC years)** excludes operating leases, so it is lower than Yahoo's figure. This is intended.
 - **Non-USD filers** (e.g. TSM, TWD): money text in the scorecard goes through `_short`, which reads the
   currency from `_CUR.code`.
-- Foreign IFRS filers and ETFs have no US-GAAP SEC facts and fall back to Yahoo (~4 years).
+- Foreign IFRS filers and ETFs have no US-GAAP SEC facts and fall back to Yahoo (~4 years). So do companies moved
+  to a new SEC filer with no annual filing yet (XOM became ExxonMobil Holdings Corp, CIK 2115436, in 2026).
+- **Merged tickers:** after a merger SEC and Yahoo can describe different companies (SUPN, Nov 2026: SEC = legacy
+  Indivior, Yahoo = legacy Supernus). `app.source_conflict` flags this when revenue AND diluted shares are both
+  >25% apart for the latest shared fiscal year (revenue alone differs for banks). Flagged tickers set
+  `info.dataConflict`: SEC annual history only, no merge/TTM/quarterly/scorecard/fair value, market cap and P/E hidden.
+- **Cash and debt tags:** securities are often under `DebtSecuritiesAvailableForSale...Current` and convertible notes
+  under `Convertible*NotesPayable*`, so check tags when a cash or debt figure looks too low.
+- **ROIC** subtracts cash plus short-term investments, and is blank when invested capital is under 5% of total assets.
 
 ## Conventions
 
@@ -65,6 +75,13 @@ single-page frontend (`static/app.js`; company tabs in `static/company.js`, home
   Nasdaq's list API (Nasdaq-100), cached a week in `.cache/members_*.json` with a stale-copy fallback; market cap
   and % change come from one paged Yahoo screener pull (US stocks > $1B, ~6 s, cached 2 min). The screener's
   `regularMarketChangePercent` is in percent. The heat map is a squarified treemap drawn as positioned `<a>` tiles.
+- Macro (`macro.py`): FRED CSVs and multpl tables cached on disk with stale fallback; each card builds separately.
+  Buffett Indicator = Fed Z.1 corporate equities / GDP, extended to today with the Wilshire 5000.
+- Screener universe: `market._universe` filters to major US exchanges in the query (OTC foreign lines crowd out real
+  listings). Unit check: `fiftyTwoWeekChangePercent` and `regularMarketChangePercent` are percent;
+  `fiftyDayAverageChangePercent`, `twoHundredDayAverageChangePercent` and `fiftyTwoWeekHigh/LowChangePercent` are fractions.
+- P/E "normal" levels use medians, because one year of tiny earnings distorts an average (KO 2017).
+- Watchlist, recent stocks and portfolio live in the browser's localStorage (`kash-watch`, `kash-recent`, `kash-portfolio`).
 - JS `cagr()` takes `[{v}, ...]` objects (as returned by `annualSeries`), not plain numbers.
 - Theme ("Ledger"): all colors are tokens at the top of `styles.css`, redefined for dark mode. Use `--brand` for
   fills with white text, `--brand-ink` for green *text* (lighter in dark mode), `--on-status` for text on

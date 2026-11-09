@@ -218,8 +218,11 @@ def _roic(c):
     pretax, tax = c["inc"]("Pretax Income"), c["inc"]("Tax Provision")
     rate = _div(tax, pretax)
     rate = rate if rate is not None and 0 <= rate <= 0.5 else 0.21
-    invested = (c["bal"]("Total Debt") or 0) + (c["bal"](EQ) or 0) - (c["bal"]("Cash And Cash Equivalents") or 0)
-    if op is None or invested <= 0:
+    cash = c["bal"](["Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents"]) or 0
+    invested = (c["bal"]("Total Debt") or 0) + (c["bal"](EQ) or 0) - cash
+    assets = c["bal"]("Total Assets")
+    # almost no invested capital (e.g. negative equity offset by debt) gives absurd results like 800%: show nothing
+    if op is None or invested <= 0 or (assets and invested < 0.05 * assets):
         return None
     return op * (1 - rate) / invested
 
