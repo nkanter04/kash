@@ -52,48 +52,6 @@ and is the price right?
 - **Hover explanations** on every statement line and ratio, sparklines for each row, and CSV export.
 - Price chart from 1 day (with pre-market and after-hours trading) to the full listing history, P/E history, analyst targets, and dark mode.
 
-## Run
-
-On Windows, double-click `start-kash.bat`. It sets up the environment on first run, starts the
-server and opens `localhost:8050` on your own computer (if Kash is already running, it just opens it). Close its window to stop.
-
-**Start automatically at login (Windows):** put a shortcut to `run-kash-hidden.vbs` in your Startup folder
-(press Win+R, type `shell:startup`). It runs the server in the background with no window and logs to
-`.cache/server.log`. Double-click `stop-kash.bat` to stop it; delete the shortcut to turn auto-start off.
-
-Or run it manually:
-
-```bash
-python -m venv .venv
-.venv/Scripts/python -m pip install -r requirements.txt
-.venv/Scripts/python -m uvicorn app:app --port 8050
-```
-
-Then open `localhost:8050` in a browser on the same computer.
-
-**SEC history needs a contact email.** The SEC asks every automated client to identify itself. Copy
-`config.example.json` to `config.json` and put your own email in it, or set the `SEC_USER_AGENT`
-environment variable. Without one, the app still works but uses Yahoo's ~4 years of annual data.
-
-## Sharing with family and friends
-
-`render.yaml` deploys a password-protected copy to [Render](https://render.com): sign in with GitHub, choose
-**New → Blueprint**, pick this repo, and enter `KASH_PASSWORD` (the password you'll share) and `SEC_USER_AGENT` (for
-example `Kash personal research you@example.com`). Visitors can use any username with that password. The site won't
-serve anything if no password is set, and Who's Trading is switched off there because those reports are for personal use.
-
-## Tests
-
-```bash
-.venv/Scripts/python -m pip install -r requirements-dev.txt
-.venv/Scripts/python -m pytest                    # everything (~20 s)
-.venv/Scripts/python -m pytest -m "not network"   # offline unit tests only
-```
-
-The live-data tests (`-m network`) check the numbers against reality: SEC revenue matches Yahoo,
-EPS × shares matches net income in every year (which catches stock-split errors), and Apple's
-historical P/E is in a sensible range.
-
 ## How it works
 
 - `app.py`: FastAPI backend. Fetches Yahoo Finance data (via yfinance), merges in SEC history, and builds
@@ -123,6 +81,51 @@ historical P/E is in a sensible range.
   Yahoo's figure.
 - Quarterly ratios that need a full year of earnings are annualized (×4).
 - Yahoo, multpl.com and Nasdaq's list are used for personal research. A public deployment would need licensed data.
+
+## Run your own copy
+
+Most people can just use the [live site](https://kashmoney.onrender.com). To run Kash on your own computer, install
+Python 3, download this repo, and on Windows double-click `start-kash.bat`. It sets everything up the first time and opens
+Kash at `localhost:8050`, which only works on that computer. Close its window to stop. On a Mac or Linux:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn app:app --port 8050
+```
+
+For the full 15 years of SEC history, copy `config.example.json` to `config.json` and put your own email in it (the SEC asks
+automated clients to identify themselves). Without it, Kash uses about 4 years of annual data from Yahoo.
+
+Who's Trading needs a local database: run `python disclosures.py build` once. The first build takes a while.
+
+## Host your own copy
+
+On [Render](https://render.com), create a **Web Service** from this repo on the Free plan:
+
+| Setting | Value |
+|---|---|
+| Build command | `pip install -r requirements.txt` |
+| Start command | `uvicorn app:app --host 0.0.0.0 --port $PORT` |
+| Health check path | `/healthz` |
+| `PYTHON_VERSION` | `3.12.7` |
+| `KASH_PASSWORD` | the password you'll share (visitors can use any username) |
+| `SEC_USER_AGENT` | `Kash personal research you@example.com` |
+
+The site won't serve anything if no password is set, and Who's Trading is switched off there because those reports are for
+personal use. On the Free plan the site sleeps after 15 minutes without visitors and takes about a minute to wake up.
+
+## Tests
+
+```bash
+.venv/Scripts/python -m pip install -r requirements-dev.txt
+.venv/Scripts/python -m pytest                    # everything (~45 s)
+.venv/Scripts/python -m pytest -m "not network"   # offline unit tests only
+```
+
+The live-data tests (`-m network`) check the numbers against reality: SEC revenue matches Yahoo,
+EPS × shares matches net income in every year (which catches stock-split errors), and Apple's
+historical P/E is in a sensible range.
 
 ## Disclaimer
 
