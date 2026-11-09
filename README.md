@@ -26,6 +26,9 @@ and is the price right?
 - **Assets:** Bitcoin and other crypto, gold, silver and other metals, oil, farm goods, currencies, sector funds and
   global markets, with returns over every period, comparison charts, and ratios such as gold/silver and Bitcoin in gold.
 - **Screener:** about 2,500 US-listed companies with filters, presets, sortable columns and CSV export.
+- **Who's Trading:** reported trades by members of Congress and corporate insiders, each person's record measured from when
+  a trade became public, reporting delays, committee overlap and insider cluster buying. Run `python disclosures.py build` to
+  create the local database. Personal research only: the law restricts commercial use, and it's off on the shared online copy.
 - **Compare:** up to five stocks side by side, with the best value on each line highlighted.
 - **Earnings calendar** and a **portfolio tracker** (kept only in your browser).
 - **Deeper stock pages:** price action (trend, RSI, moving averages), what $10,000 would be worth vs. the S&P 500,
@@ -69,6 +72,13 @@ Then open http://localhost:8050 (or http://localhost:8050/stock/ACN).
 **SEC history needs a contact email.** The SEC asks every automated client to identify itself. Copy
 `config.example.json` to `config.json` and put your own email in it, or set the `SEC_USER_AGENT`
 environment variable. Without one, the app still works but uses Yahoo's ~4 years of annual data.
+
+## Sharing with family and friends
+
+`render.yaml` deploys a password-protected copy to [Render](https://render.com): sign in with GitHub, choose
+**New → Blueprint**, pick this repo, and enter `KASH_PASSWORD` (the password you'll share) and `SEC_USER_AGENT` (for
+example `Kash personal research you@example.com`). Visitors can use any username with that password. The site won't
+serve anything if no password is set, and Who's Trading is switched off there because those reports are for personal use.
 
 ## Tests
 

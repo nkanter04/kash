@@ -15,6 +15,12 @@ Portfolio/Macro/Assets plus the watchlist in `pages.js`; `index.html` calls `rou
   writes to `.cache/server.pid` at startup. Restart it after stopping (run the .vbs) so the owner isn't left without it.
 - `--reload` can hang after several backend edits (the log says "Reloading" but the old worker keeps serving). If new
   code doesn't take effect, restart: `stop-kash.ps1`, then launch `run-kash-hidden.vbs`.
+- Shared online copy: `render.yaml` on Render. `app.hosted()` (RENDER or KASH_PASSWORD set) requires the Basic-auth
+  password on everything except `/healthz`, serves nothing if hosted without a password, and returns 404 for `/api/people*`.
+- Who's Trading: `disclosures.py` builds `.cache/disclosures.db` (`python disclosures.py build`, incremental); `people.py`
+  queries it; `static/people.js` is the UI. The owner accepted the Senate/OGE acknowledgment for personal research only:
+  never commit the database or serve it publicly. "Beat the S&P" is measured from the filing date (when a trade became public).
+  SEC data lags to the last quarter's end. Trump's filings are OCR'd scans from a hand-kept list (`TRUMP_REPORTS`), partial.
 - Tests: `.venv/Scripts/python -m pytest` runs everything (~45 s).
   `-m "not network"` runs only the offline unit tests (~5 s); `-m network` runs only the live-data checks.
   Run the tests after any change to `app.py`, `sec.py` or `rows.py`.

@@ -6,8 +6,11 @@ a simple scorecard. Run with:  python -m uvicorn app:app --port 8050
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import math
 import os
+import secrets
 import statistics
 import threading
 import time
@@ -20,13 +23,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 import assets as asset_data
 import company
+import disclosures
 import macro
 import market
+import people
 import scores
 import sec
 from rows import BALANCE_ROWS, CASHFLOW_ROWS, INCOME_ROWS, RATIO_ROWS
@@ -46,6 +51,11 @@ def _warm_caches():
             job()
         except Exception:  # noqa: BLE001
             pass
+    if not hosted():        # the disclosure data is personal-use only and never exists on the shared copy
+        try:
+            disclosures.refresh_if_stale()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @asynccontextmanager
@@ -53,7 +63,8 @@ async def lifespan(_app):
     """Record the serving process's PID so stop-kash.ps1 can stop it (with --reload it's a child process
     whose command line doesn't mention uvicorn)."""
     PID_FILE.parent.mkdir(exist_ok=True)
-    PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    if not os.environ.get("KASH_PASSWORD"):   # a password-protected copy must not overwrite the main server's record
+        PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
     threading.Thread(target=_warm_caches, daemon=True).start()
     yield
     try:
@@ -67,6 +78,22 @@ app = FastAPI(title="Kash", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=2000)
 
 
+def hosted() -> bool:
+    """True on the shared online copy (Render sets RENDER; a password also means it's being shared)."""
+    return bool(os.environ.get("RENDER") or os.environ.get("KASH_PASSWORD"))
+
+
+def _password_ok(header: str, password: str) -> bool:
+    """HTTP Basic auth: any username, and the shared password."""
+    if not header.startswith("Basic "):
+        return False
+    try:
+        supplied = base64.b64decode(header[6:], validate=True).decode("utf-8").partition(":")[2]
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    return secrets.compare_digest(supplied.encode(), password.encode())
+
+
 @app.middleware("http")
 async def no_stale_frontend(request, call_next):
     """Make browsers revalidate the page and static files, so an update shows on a normal refresh."""
@@ -74,6 +101,22 @@ async def no_stale_frontend(request, call_next):
     if not request.url.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache"
     return response
+
+
+@app.middleware("http")
+async def password_gate(request, call_next):
+    """Everything except the host's health check needs the password on the shared copy. Fails closed: a hosted copy
+    with no password set serves nothing."""
+    if request.url.path == "/healthz":
+        return await call_next(request)
+    password = os.environ.get("KASH_PASSWORD")
+    if password:
+        if _password_ok(request.headers.get("authorization", ""), password):
+            return await call_next(request)
+        return Response("Password required.", status_code=401, headers={"WWW-Authenticate": 'Basic realm="Kash", charset="UTF-8"'})
+    if os.environ.get("RENDER"):
+        return Response("Set KASH_PASSWORD on the host before sharing this site.", status_code=503)
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------- helpers
@@ -801,6 +844,49 @@ def stock_peers(ticker: str):
     return _safe(lambda: market.peers(ticker.upper().strip()), "peers")
 
 
+def _people_allowed():
+    """Disclosure reports were approved for the owner's personal research only: never serve them from the shared copy."""
+    if hosted():
+        raise HTTPException(404, "Who's Trading isn't available on the shared version of Kash.")
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True}
+
+
+@app.get("/api/config")
+def site_config():
+    return {"people": not hosted()}
+
+
+@app.get("/api/people")
+def people_overview(group: str | None = None):
+    _people_allowed()
+    return _safe(lambda: people.overview(group), "disclosures")
+
+
+@app.get("/api/people/search")
+def people_search(q: str):
+    _people_allowed()
+    return _safe(lambda: people.search(q), "search")
+
+
+@app.get("/api/people/stock/{ticker}")
+def people_for_stock(ticker: str):
+    _people_allowed()
+    return _safe(lambda: people.for_stock(ticker.upper().strip()), "disclosures")
+
+
+@app.get("/api/people/{pid}")
+def person_detail(pid: str):
+    _people_allowed()
+    d = _safe(lambda: people.person(pid), "this person")
+    if d is None:
+        raise HTTPException(404, "Person not found.")
+    return d
+
+
 @app.get("/api/macro")
 def macro_overview():
     return _safe(macro.overview, "macro data")
@@ -862,9 +948,11 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 @app.get("/screener")
 @app.get("/compare")
 @app.get("/portfolio")
+@app.get("/people")
+@app.get("/people/{pid}")
 @app.get("/earnings")
 @app.get("/macro")
 @app.get("/assets")
 @app.get("/stock/{ticker}")
-def index(ticker: str | None = None):
+def index(ticker: str | None = None, pid: str | None = None):
     return FileResponse(STATIC / "index.html")

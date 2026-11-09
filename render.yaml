@@ -1,0 +1,18 @@
+# Render blueprint for the shared, password-protected copy of Kash.
+# Render asks for the two sync:false values when the blueprint is created; they are never stored in this repo.
+services:
+  - type: web
+    name: kash
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: KASH_PASSWORD
+        sync: false
+      - key: SEC_USER_AGENT
+        sync: false

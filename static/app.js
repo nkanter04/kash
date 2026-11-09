@@ -78,6 +78,9 @@ document.addEventListener("click", (e) => {
 function route() {
   const path = location.pathname.replace(/\/$/, "") || "/";
   document.querySelectorAll("#mainnav a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === path));
+  if (path.startsWith("/people")) document.querySelector('#mainnav a[href="/people"]').classList.add("on");
+  const person = path.match(/^\/people\/([^/]+)/);
+  if (person) return renderPerson(decodeURIComponent(person[1]));
   const m = path.match(/^\/stock\/([^/]+)/i);
   if (m) loadStock(decodeURIComponent(m[1]).toUpperCase());
   else if (PAGES[path]) PAGES[path]();

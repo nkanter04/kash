@@ -430,4 +430,5 @@ async function loadPortfolio() {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8, color: css("--ink-2") } }, tooltip: { callbacks: { label: (it) => `${it.label}: ${usd(it.parsed)} (${pct(it.parsed / total, 0)})` } } } } });
 }
 
-const PAGES = { "/portfolio": renderPortfolio, "/screener": renderScreener, "/compare": renderCompare, "/earnings": renderEarnings, "/macro": renderMacro, "/assets": renderAssets };
+const PAGES = { "/people": () => renderPeople(),   // people.js loads after this file
+   "/portfolio": renderPortfolio, "/screener": renderScreener, "/compare": renderCompare, "/earnings": renderEarnings, "/macro": renderMacro, "/assets": renderAssets };

@@ -424,3 +424,17 @@ table.sortable th, table.sortable td { padding-left: 9px; padding-right: 9px; }
 .x-btn { border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 16px; }
 .x-btn:hover { color: var(--bad); }
 
+/* ---------- Who's Trading (people.js) */
+.ppl-search { position: relative; margin-top: 12px; }
+.ppl-search input { width: 100%; font: inherit; font-size: 16px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); }
+.ppl-results { position: absolute; z-index: 15; left: 0; right: 0; top: 50px; margin: 0; padding: 4px; list-style: none; background: var(--card); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); max-height: 340px; overflow: auto; }
+.ppl-results a { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; color: var(--ink); border-radius: 4px; }
+.ppl-results a:hover { background: var(--soft); }
+.party { display: inline-block; width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 3px; font-size: 11px; font-weight: 700; color: #fff; margin-left: 4px; }
+.party.D { background: #3b6fb6; } .party.R { background: #b8483f; } .party.I { background: var(--ink-3); }
+.side-buy { color: var(--good); font-weight: 700; } .side-sell { color: var(--bad); font-weight: 700; }
+.late-tag { color: var(--bad); font-weight: 600; }
+td.asset { white-space: normal; max-width: 260px; }
+.ppl-note { margin-top: 18px; }
+.seg.filter { margin-bottom: 10px; }
+
