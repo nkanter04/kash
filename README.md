@@ -1,5 +1,7 @@
 # Kash
 
+**[Open the live site](https://kashmoney.onrender.com)** (password required; ask the owner). The first visit after a quiet spell can take about a minute to wake up.
+
 A friendly stock analysis tool. It shows full financial statements (income statement, balance sheet,
 cash flow and ratios, annual and quarterly, with TTM) with a plain-English explanation on every line,
 plus an 8-point scorecard and a "story in charts" overview that answers the questions an investor
@@ -53,7 +55,7 @@ and is the price right?
 ## Run
 
 On Windows, double-click `start-kash.bat`. It sets up the environment on first run, starts the
-server and opens http://localhost:8050 (if Kash is already running, it just opens it). Close its window to stop.
+server and opens `localhost:8050` on your own computer (if Kash is already running, it just opens it). Close its window to stop.
 
 **Start automatically at login (Windows):** put a shortcut to `run-kash-hidden.vbs` in your Startup folder
 (press Win+R, type `shell:startup`). It runs the server in the background with no window and logs to
@@ -67,7 +69,7 @@ python -m venv .venv
 .venv/Scripts/python -m uvicorn app:app --port 8050
 ```
 
-Then open http://localhost:8050 (or http://localhost:8050/stock/ACN).
+Then open `localhost:8050` in a browser on the same computer.
 
 **SEC history needs a contact email.** The SEC asks every automated client to identify itself. Copy
 `config.example.json` to `config.json` and put your own email in it, or set the `SEC_USER_AGENT`
