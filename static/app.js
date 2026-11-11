@@ -68,6 +68,19 @@ function fmt(v, f) {
 function medianOf(a) { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null; }
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// Company logo from Parqet (full square tiles), then Financial Modeling Prep, else the ticker's first letter.
+// no-referrer keeps the page address (and its ticker) from being sent to the logo hosts.
+function logoBadge(t) {
+  const letter = `<span>${esc((t || "?")[0])}</span>`;
+  if (!t) return `<div class="logo">${letter}</div>`;
+  const q = encodeURIComponent(t);
+  return `<div class="logo">${letter}<img alt="" referrerpolicy="no-referrer"
+    src="https://assets.parqet.com/logos/symbol/${q}?format=png&size=128"
+    data-alt="https://financialmodelingprep.com/image-stock/${q}.png"
+    onload="this.parentNode.classList.add('has-img')"
+    onerror="if (this.dataset.alt) { this.src = this.dataset.alt; this.dataset.alt = ''; } else this.remove();"></div>`;
+}
+
 /* ------------------------------------------------------------ routing */
 function go(path) { history.pushState({}, "", path); route(); }
 window.onpopstate = route;
@@ -172,7 +185,7 @@ function renderStock() {
   app.innerHTML = `
     <div class="head">
       <div class="ident">
-        <div class="logo">${esc((d.ticker || "?")[0])}</div>
+        ${logoBadge(d.ticker)}
         <div>
           <h1>${esc(i.longName || i.shortName || d.ticker)} ${starBtn(d.ticker, "big")}</h1>
           <div class="tags"><span class="tag"><b>${esc(d.ticker)}</b> · ${esc(i.fullExchangeName || i.exchange || "")}</span>
