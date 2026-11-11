@@ -2,6 +2,8 @@
 
 **[Open the live site](https://kashmoney.onrender.com)** (password required; ask the owner). The first visit after a quiet spell can take about a minute to wake up.
 
+**[Open Who's Trading](http://localhost:8050/people)** (only works on the computer running Kash; it isn't on the live site).
+
 A friendly stock analysis tool. It shows full financial statements (income statement, balance sheet,
 cash flow and ratios, annual and quarterly, with TTM) with a plain-English explanation on every line,
 plus an 8-point scorecard and a "story in charts" overview that answers the questions an investor
