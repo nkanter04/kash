@@ -334,7 +334,7 @@ a.idx-card:hover { border-color: var(--brand); }
 .mainnav a:hover { color: var(--ink); background: var(--soft); }
 .mainnav a.on { color: var(--brand-ink); background: var(--brand-soft); }
 .search { max-width: 340px; }
-@media (max-width: 860px) {
+@media (max-width: 1080px) {
   .topbar-inner { flex-wrap: wrap; height: auto; padding-top: 10px; padding-bottom: 6px; gap: 8px 12px; }
   .mainnav { order: 3; width: 100%; margin-left: 0; overflow-x: auto; scrollbar-width: none; }
   .mainnav::-webkit-scrollbar { display: none; }
@@ -363,6 +363,12 @@ a.watch-card:hover { border-color: var(--brand); }
 .k-label { margin-bottom: 6px; }
 .hm-when { margin-top: 10px; }
 table.mini { margin-top: 6px; }
+.pbar { position: relative; min-width: 110px; text-align: right; }
+.pbar i { position: absolute; right: 0; top: -2px; bottom: -2px; height: auto; background: var(--brand-soft); border-radius: 3px; }
+.pbar span { position: relative; padding-right: 4px; }
+.qs { display: inline-block; min-width: 38px; padding: 1px 7px; border-radius: 999px; font-weight: 600; font-size: 13px; background: var(--soft); color: var(--ink-2); }
+.qs.q5, .qs.q6 { background: var(--good); color: var(--on-status); }
+.qs.q0, .qs.q1 { background: var(--bad); color: var(--on-status); }
 table.mini td { padding: 6px 8px; border-bottom: 1px solid var(--line); }
 table.mini tr:last-child td { border-bottom: 0; }
 td.co { white-space: normal; max-width: 260px; }

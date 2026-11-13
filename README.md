@@ -29,7 +29,12 @@ and is the price right?
   sentiment and key economic data, with up to 155 years of history and recession shading.
 - **Assets:** Bitcoin and other crypto, gold, silver and other metals, oil, farm goods, currencies, sector funds and
   global markets, with returns over every period, comparison charts, and ratios such as gold/silver and Bitcoin in gold.
-- **Screener:** about 2,500 US-listed companies with filters, presets, sortable columns and CSV export.
+- **Screener:** about 2,500 US-listed companies with filters, presets, sortable columns and CSV export. A "Business quality"
+  view screens on up to 15 years of SEC filings: return on capital in a typical and in the worst year, 10-year sales and EPS
+  growth, how many years the company was profitable and cash-positive, buybacks, and a 0-6 quality score.
+- **Big Investors:** what 37 well-known investors (Buffett, Ackman, Burry, Klarman and others) hold, from their quarterly
+  13F reports to the SEC: each portfolio, what they bought and sold last quarter, the stocks most of them own, and on every
+  stock page, which of them hold it.
 - **Who's Trading:** reported trades by members of Congress and corporate insiders, each person's record measured from when
   a trade became public, reporting delays, committee overlap and insider cluster buying. Run `python disclosures.py build` to
   create the local database. Personal research only: the law restricts commercial use, and it's off on the shared online copy.
@@ -67,6 +72,9 @@ and is the price right?
   Wikipedia and Nasdaq, market data from Yahoo's screener.
 - `macro.py`: market valuation, recession and sentiment gauges (FRED, multpl.com/Shiller, Yahoo).
 - `assets.py`: crypto, commodities, currencies and funds (Yahoo).
+- `funds.py`: Big Investors, from SEC 13F filings. `python funds.py build` updates `.cache/funds.db`.
+- `fundamentals.py`: the screener's long-history measures. `python fundamentals.py build` reads every company's SEC
+  history (about 25 minutes) into `.cache/fundamentals.json`. Copies of both live in `data/` for hosted sites.
 - `scores.py`: Piotroski and Altman scores and total returns.
 - `rows.py`: every statement and ratio line, with its label, data source or formula, and plain-English
   description.
@@ -82,6 +90,7 @@ and is the price right?
 - Total Debt from SEC filings counts loans and bonds but not operating leases, so it can be lower than
   Yahoo's figure.
 - Quarterly ratios that need a full year of earnings are annualized (×4).
+- 13F reports arrive up to 45 days after a quarter ends and list only US-listed stocks and options: no shorts, bonds or cash.
 - Yahoo, multpl.com and Nasdaq's list are used for personal research. A public deployment would need licensed data.
 
 ## Run your own copy

@@ -81,6 +81,18 @@ Portfolio/Macro/Assets plus the watchlist in `pages.js`; `index.html` calls `rou
   Nasdaq's list API (Nasdaq-100), cached a week in `.cache/members_*.json` with a stale-copy fallback; market cap
   and % change come from one paged Yahoo screener pull (US stocks > $1B, ~6 s, cached 2 min). The screener's
   `regularMarketChangePercent` is in percent. The heat map is a squarified treemap drawn as positioned `<a>` tiles.
+- Big Investors (`funds.py`, `static/funds.js`, `/investors`): 13F holdings of the hand-kept `MANAGERS` list (each id is
+  checked against a word in the SEC's name). CUSIPs map to tickers through the SEC's fails-to-deliver files, which write
+  share classes without a separator (BRKB), so tickers are respelled to match `company_tickers.json` (BRK-B). 13F values
+  are dollars since 2023, but some filers still report thousands: `parse_info_table` detects a median under $1 a share.
+  Options (put/call rows) are stored but left out of portfolio percentages. Refreshes at startup when not hosted.
+- Quality screener (`fundamentals.py`): summaries built with `sec.frames_from_facts`, the same code as the stock pages,
+  merged into `/api/market/screener` rows. Share-count growth outside -20%..+60% a year is blanked (filings that switch
+  between units and thousands, e.g. MCD). The build fetches splits from Yahoo in bulk; running it while the server is up
+  once corrupted yfinance's own cache (`%LOCALAPPDATA%\py-yfinance\tkr-tz.db`, "database disk image is malformed"):
+  stop the server, delete that file, restart.
+- Both read `.cache/` first and fall back to the committed copies in `data/` (public SEC data), which is what the hosted
+  site uses. After a rebuild run `python funds.py snapshot` and `python fundamentals.py snapshot`, then commit `data/`.
 - Macro (`macro.py`): FRED CSVs and multpl tables cached on disk with stale fallback; each card builds separately.
   Buffett Indicator = Fed Z.1 corporate equities / GDP, extended to today with the Wilshire 5000.
 - Screener universe: `market._universe` filters to major US exchanges in the query (OTC foreign lines crowd out real

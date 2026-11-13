@@ -56,7 +56,31 @@ const SCREEN_COLS = [
   ["fromHigh", "From high", null, "Distance below the 52-week high."],
   ["rating", "Analysts", (r) => ratingText(r.rating), "Average rating, where 1 is strong buy and 5 is sell."],
 ];
+const yrsOf10 = (v) => (v == null ? "–" : `${v} of 10`);
+const perYear = (v) => (v == null ? "–" : (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%");
+const QUALITY_COLS = [
+  ["qs", "Quality", (r) => (r.qs == null ? "–" : `<span class="qs q${r.qs}">${r.qs}/${r.qn}</span>`), "Business checks passed, from the scorecard: sales growing 5%+ a year, 10%+ profit margin, positive free cash flow every year, 10%+ return on capital, a solid balance sheet, and not diluting shareholders. Price checks are on each stock's page."],
+  ["rev10", "Sales 10Y", (r) => perYear(r.rev10), "Revenue growth per year over the last 10 fiscal years."],
+  ["eps10", "EPS 10Y", (r) => perYear(r.eps10), "Growth in earnings per share, per year, over the last 10 fiscal years."],
+  ["roic10", "ROIC 10Y", (r) => pct(r.roic10, 0), "Return on invested capital in a typical year (the median of the last 10): profit earned on each $1 put into the business."],
+  ["roicMin", "Worst year", (r) => pct(r.roicMin, 0), "The lowest return on invested capital in any of the last 10 years."],
+  ["rs", "ROIC trend", (r) => (r.rs ? spark([...r.rs].reverse()) : ""), "Return on invested capital over the last 10 years."],
+  ["roic15", "Years 15%+", (r) => yrsOf10(r.roic15), "How many of the last 10 years the return on invested capital was 15% or more."],
+  ["nm", "Net margin", (r) => pct(r.nm, 1), "Profit kept from each $1 of sales in the latest fiscal year."],
+  ["sh10", "Shares 10Y", (r) => perYear(r.sh10), "Change in the share count per year over 10 years. Negative means buybacks are shrinking it, which gives each share a bigger slice."],
+  ["fcfPos", "Cash years", (r) => yrsOf10(r.fcfPos), "How many of the last 10 years the company produced positive free cash flow."],
+  ["pe", "P/E", (r) => n2(r.pe), "Price ÷ last 12 months' earnings."],
+];
+const screenCols = () => (scr.view === "quality" ? QUALITY_COLS : SCREEN_COLS);
+const QUALITY_FIELDS = [["qsMin", "Quality score min (0-6)"], ["rev10Min", "Sales growth 10Y min (%/yr)"], ["eps10Min", "EPS growth 10Y min (%/yr)"], ["roic10Min", "ROIC 10Y min (%)"],
+  ["roicMinMin", "ROIC worst year min (%)"], ["roic15Min", "Years with ROIC 15%+ (of 10)"], ["nmMin", "Net margin min (%)"], ["sh10Max", "Share change 10Y max (%/yr)"],
+  ["fcfPosMin", "Years of positive cash (of 10)"], ["profMin", "Profitable years (of 10)"], ["revUpMin", "Years sales grew (of 10)"]];
+const QUALITY_KEYS = new Set(QUALITY_FIELDS.map(([k]) => k));
 const SCREEN_PRESETS = [
+  ["Compounders", "15%+ return on capital every year for 10 years, with sales growing 8%+ a year", { roic15Min: 10, rev10Min: 8 }],
+  ["Quality at a fair price", "Passes every business check, P/E of 25 or less", { qsMin: 6, peMax: 25 }],
+  ["Buyback machines", "Share count shrinking 2%+ a year for 10 years, cash positive every year", { sh10Max: -2, fcfPosMin: 10 }],
+  ["Steady growers", "Sales up and profitable in each of the last 10 years", { revUpMin: 10, profMin: 10 }],
   ["Bargains", "Low P/E on a solid size", { capMin: 2, peMax: 15, fpeMax: 15 }],
   ["Dividends", "Yield of 3% or more, not overpriced", { divMin: 3, peMax: 25, capMin: 2 }],
   ["Momentum", "Strong year, near highs", { ch1yMin: 30, above200: true, fromHighMin: -10, capMin: 2 }],
@@ -66,12 +90,12 @@ const SCREEN_PRESETS = [
 ];
 const SCREEN_FIELDS = [["capMin", "Market cap min ($B)"], ["peMax", "P/E max"], ["fpeMax", "Forward P/E max"], ["pbMax", "P/B max"], ["divMin", "Yield min (%)"],
   ["ch1yMin", "1Y change min (%)"], ["fromHighMin", "From high min (%)"], ["fromHighMax", "From high max (%)"], ["ratingMax", "Analyst rating max"]];
-const scr = { rows: null, universe: "all", f: {}, sort: "cap", dir: -1, shown: 100, preset: null };
+const scr = { rows: null, universe: "all", f: {}, sort: "cap", dir: -1, shown: 100, preset: null, view: "price", quality: null };
 
 async function renderScreener() {
   pageStart("Screener");
   app.innerHTML = `<section class="home-head"><h1>Stock screener</h1><p class="sub">Filter US-listed companies worth $1B or more. Results update as you type.</p></section><div id="scrBody">${pageLoading("Loading stocks…")}</div>`;
-  try { scr.rows = (await getJSON("/api/market/screener")).rows; } catch (e) { $("#scrBody").innerHTML = pageError(e); return; }
+  try { const d = await getJSON("/api/market/screener"); scr.rows = d.rows; scr.quality = d.quality; } catch (e) { $("#scrBody").innerHTML = pageError(e); return; }
   const sectors = [...new Set(scr.rows.map((r) => r.sector).filter(Boolean))].sort();
   $("#scrBody").innerHTML = `
     <div class="card">
@@ -85,16 +109,22 @@ async function renderScreener() {
         <label>Sector (S&P/Nasdaq-100)<select data-f="sector"><option value="">Any</option>${sectors.map((s) => `<option>${esc(s)}</option>`).join("")}</select></label>
         <label class="check-l"><input type="checkbox" data-f="above200"> Above 200-day average</label>
       </div>
+      ${scr.quality ? `<h3 class="day" style="margin:18px 0 0" data-tip="Worked out from each company's annual reports to the SEC, up to 15 years back. Companies without that history (foreign filers, recent listings) are left out when you use these filters.">Business quality over 10 years <span class="info">i</span></h3>
+      <div class="filters">${QUALITY_FIELDS.map(([k, l]) => `<label>${l}<input type="number" step="any" data-f="${k}" inputmode="decimal"></label>`).join("")}</div>` : ""}
     </div>
-    <p class="muted" id="scrCount" style="margin:14px 2px 8px"></p>
+    <div class="row-between" style="margin:14px 2px 8px"><p class="muted" id="scrCount" style="margin:0"></p>
+      ${scr.quality ? `<div class="seg" id="scrView"><button data-v="price" class="${scr.view === "price" ? "on" : ""}">Price &amp; value</button><button data-v="quality" class="${scr.view === "quality" ? "on" : ""}">Business quality</button></div>` : ""}
+    </div>
     <div class="tbl-wrap"><table class="plain sortable"><thead><tr id="scrHead"></tr></thead><tbody id="scrRows"></tbody></table></div>
     <div style="text-align:center;margin-top:14px"><button class="btn" id="scrMore" hidden>Show more</button></div>`;
   syncScreenInputs();
   $("#scrUni").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; scr.universe = b.dataset.u; [...$("#scrUni").children].forEach((x) => x.classList.toggle("on", x === b)); drawScreener(true); };
-  $("#scrPresets").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; scr.f = { ...SCREEN_PRESETS[b.dataset.p][2] }; scr.preset = +b.dataset.p; syncScreenInputs(); drawScreener(true); };
+  $("#scrPresets").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; scr.f = { ...SCREEN_PRESETS[b.dataset.p][2] }; scr.preset = +b.dataset.p; setScreenView(Object.keys(scr.f).some((k) => QUALITY_KEYS.has(k)) ? "quality" : "price"); syncScreenInputs(); drawScreener(true); };
+  if ($("#scrView")) $("#scrView").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; setScreenView(b.dataset.v); drawScreener(); };
   $("#scrClear").onclick = () => { scr.f = {}; scr.preset = null; syncScreenInputs(); drawScreener(true); };
   $("#scrMore").onclick = () => { scr.shown += 100; drawScreener(); };
-  $("#scrCsv").onclick = () => { const r = screenRows(); downloadRows("kash-screener.csv", ["Ticker", "Name", "Sector", "Market cap", "Price", "Today", "P/E", "Fwd P/E", "P/B", "Yield", "1Y", "vs 200-day", "From high", "Rating"], r.map((x) => [x.symbol, x.name, x.sector, x.cap, x.price, x.change, x.pe, x.fpe, x.pb, x.div, x.ch1y, x.ma200, x.fromHigh, x.rating])); };
+  $("#scrCsv").onclick = () => { const r = screenRows(); downloadRows("kash-screener.csv", ["Ticker", "Name", "Sector", "Market cap", "Price", "Today", "P/E", "Fwd P/E", "P/B", "Yield", "1Y", "vs 200-day", "From high", "Rating", "Quality score", "Sales growth 10Y", "EPS growth 10Y", "ROIC 10Y median", "ROIC worst year", "Years ROIC 15%+", "Net margin", "Share change 10Y", "Years positive FCF", "Years of SEC history"],
+    r.map((x) => [x.symbol, x.name, x.sector, x.cap, x.price, x.change, x.pe, x.fpe, x.pb, x.div, x.ch1y, x.ma200, x.fromHigh, x.rating, x.qs, x.rev10, x.eps10, x.roic10, x.roicMin, x.roic15, x.nm, x.sh10, x.fcfPos, x.yrs])); };
   document.querySelectorAll(".filters [data-f]").forEach((el) => {
     el.oninput = () => {
       const k = el.dataset.f;
@@ -104,6 +134,12 @@ async function renderScreener() {
     };
   });
   drawScreener(true);
+}
+function setScreenView(v) {
+  if (!scr.quality) v = "price";
+  if (scr.view !== v && !screenCols().some(([k]) => k === scr.sort && (v === "quality" ? QUALITY_COLS : SCREEN_COLS).some(([k2]) => k2 === k))) { scr.sort = "cap"; scr.dir = -1; }
+  scr.view = v;
+  document.querySelectorAll("#scrView button").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
 }
 function syncScreenInputs() {
   document.querySelectorAll(".filters [data-f]").forEach((el) => { const v = scr.f[el.dataset.f]; if (el.type === "checkbox") el.checked = !!v; else el.value = v ?? ""; });
@@ -125,10 +161,15 @@ function screenRows() {
     if (f.sector && r.sector !== f.sector) return false;
     if (f.above200 && !(r.ma200 > 0)) return false;
     if (f.special === "garp" && !(r.pe > 0 && r.fpe > 0 && r.fpe < r.pe * 0.8)) return false;
+    if (!ok(r.qs, f.qsMin, null) || !ok(r.roic15, f.roic15Min, null) || !ok(r.fcfPos, f.fcfPosMin, null) || !ok(r.prof, f.profMin, null) || !ok(r.revUp, f.revUpMin, null)) return false;
+    const p = (v) => (v != null ? v / 100 : null);
+    if (!ok(r.rev10, p(f.rev10Min), null) || !ok(r.eps10, p(f.eps10Min), null) || !ok(r.roic10, p(f.roic10Min), null) || !ok(r.roicMin, p(f.roicMinMin), null)
+      || !ok(r.nm, p(f.nmMin), null) || !ok(r.sh10, null, p(f.sh10Max))) return false;
     return true;
   });
   const k = scr.sort, d = scr.dir;
-  out.sort((a, b) => (a[k] == null ? 1 : b[k] == null ? -1 : (a[k] - b[k]) * d));
+  const val = (r) => (k === "rs" ? r.roic : r[k]);       // the trend column sorts by the latest year
+  out.sort((a, b) => (val(a) == null ? 1 : val(b) == null ? -1 : (val(a) - val(b)) * d));
   return out;
 }
 function drawScreener(reset) {
@@ -136,10 +177,10 @@ function drawScreener(reset) {
   if (reset) scr.shown = 100;
   const rows = screenRows();
   $("#scrCount").textContent = `${rows.length.toLocaleString()} ${rows.length === 1 ? "company matches" : "companies match"}.`;
-  $("#scrHead").innerHTML = `<th class="l">Company</th>` + SCREEN_COLS.map(([k, l, , tip]) => `<th data-sort="${k}" ${tip ? `data-tip="${esc(tip)}"` : ""} class="${scr.sort === k ? "sorted" : ""}">${l}${scr.sort === k ? (scr.dir < 0 ? " ▼" : " ▲") : ""}</th>`).join("");
-  $("#scrHead").onclick = (e) => { const t = e.target.closest("[data-sort]"); if (!t) return; const k = t.dataset.sort; if (scr.sort === k) scr.dir = -scr.dir; else { scr.sort = k; scr.dir = ["pe", "fpe", "pb", "rating"].includes(k) ? 1 : -1; } drawScreener(); };
+  $("#scrHead").innerHTML = `<th class="l">Company</th>` + screenCols().map(([k, l, , tip]) => `<th data-sort="${k}" ${tip ? `data-tip="${esc(tip)}"` : ""} class="${scr.sort === k ? "sorted" : ""}">${l}${scr.sort === k ? (scr.dir < 0 ? " ▼" : " ▲") : ""}</th>`).join("");
+  $("#scrHead").onclick = (e) => { const t = e.target.closest("[data-sort]"); if (!t) return; const k = t.dataset.sort; if (scr.sort === k) scr.dir = -scr.dir; else { scr.sort = k; scr.dir = ["pe", "fpe", "pb", "rating", "sh10"].includes(k) ? 1 : -1; } drawScreener(); };
   $("#scrRows").innerHTML = rows.slice(0, scr.shown).map((r) => `<tr><td class="l co">${starBtn(r.symbol)}${stockLink(r.symbol)}<div class="muted small nm">${esc(r.name || "")}</div></td>` +
-    SCREEN_COLS.map(([k, , f]) => (f ? `<td>${f(r)}</td>` : chgCell(r[k]))).join("") + `</tr>`).join("") || `<tr><td colspan="12" class="muted" style="text-align:center;padding:30px">No companies match these filters.</td></tr>`;
+    screenCols().map(([k, , f]) => (f ? `<td>${f(r)}</td>` : chgCell(r[k]))).join("") + `</tr>`).join("") || `<tr><td colspan="12" class="muted" style="text-align:center;padding:30px">No companies match these filters.</td></tr>`;
   $("#scrMore").hidden = rows.length <= scr.shown;
 }
 
@@ -430,5 +471,5 @@ async function loadPortfolio() {
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "bottom", labels: { usePointStyle: true, boxWidth: 8, color: css("--ink-2") } }, tooltip: { callbacks: { label: (it) => `${it.label}: ${usd(it.parsed)} (${pct(it.parsed / total, 0)})` } } } } });
 }
 
-const PAGES = { "/people": () => renderPeople(),   // people.js loads after this file
+const PAGES = { "/people": () => renderPeople(), "/investors": () => renderFunds(),   // people.js loads after this file
    "/portfolio": renderPortfolio, "/screener": renderScreener, "/compare": renderCompare, "/earnings": renderEarnings, "/macro": renderMacro, "/assets": renderAssets };

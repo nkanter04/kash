@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 import assets as asset_data
 import company
 import disclosures
+import funds
 import macro
 import market
 import people
@@ -56,6 +57,7 @@ def _warm_caches():
             disclosures.refresh_if_stale()
         except Exception:  # noqa: BLE001
             pass
+        funds.refresh_if_stale()   # hosted copies use the snapshot in data/ instead of downloading
 
 
 @asynccontextmanager
@@ -887,6 +889,24 @@ def person_detail(pid: str):
     return d
 
 
+@app.get("/api/funds")
+def funds_overview():
+    return _safe(funds.overview, "the big investors")
+
+
+@app.get("/api/funds/stock/{ticker}")
+def funds_for_stock(ticker: str):
+    return _safe(lambda: funds.for_stock(ticker.upper().strip()), "the big investors")
+
+
+@app.get("/api/funds/{cik}")
+def fund_detail(cik: int):
+    d = _safe(lambda: funds.manager(cik), "this investor")
+    if d is None:
+        raise HTTPException(404, "Investor not found.")
+    return d
+
+
 @app.get("/api/macro")
 def macro_overview():
     return _safe(macro.overview, "macro data")
@@ -950,9 +970,11 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 @app.get("/portfolio")
 @app.get("/people")
 @app.get("/people/{pid}")
+@app.get("/investors")
+@app.get("/investors/{cik}")
 @app.get("/earnings")
 @app.get("/macro")
 @app.get("/assets")
 @app.get("/stock/{ticker}")
-def index(ticker: str | None = None, pid: str | None = None):
+def index(ticker: str | None = None, pid: str | None = None, cik: str | None = None):
     return FileResponse(STATIC / "index.html")

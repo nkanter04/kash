@@ -225,9 +225,13 @@ def _row(symbol: str, q: dict, m: dict | None) -> dict:
 
 def screener() -> dict:
     mem = _membership()
-    rows = [_row(s, q, mem.get(s)) for s, q in quotes_all().items() if q.get("cap")]
+    import fundamentals
+    fund = fundamentals.load()          # long-history quality measures from SEC filings, when built
+    quality = fund.get("rows", {})
+    rows = [{**_row(s, q, mem.get(s)), **{k: v for k, v in quality.get(s, {}).items() if k != "fy"}}
+            for s, q in quotes_all().items() if q.get("cap")]
     rows.sort(key=lambda r: -r["cap"])
-    return {"rows": rows, "asOf": int(time.time())}
+    return {"rows": rows, "asOf": int(time.time()), "quality": fund.get("built")}
 
 
 def movers() -> dict:

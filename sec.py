@@ -226,6 +226,11 @@ def annual_frames(ticker: str, max_years: int = 15, splits=None):
                       CACHE / f"facts_{cik}.json", FACTS_TTL)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
         return None
+    return frames_from_facts(data, max_years, splits)
+
+
+def frames_from_facts(data: dict | None, max_years: int = 15, splits=None):
+    """Build the annual statements from an already-loaded SEC "company facts" document."""
     if not data:
         return None
     gaap = data.get("facts", {}).get("us-gaap")

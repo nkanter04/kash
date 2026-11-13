@@ -92,6 +92,9 @@ function route() {
   const path = location.pathname.replace(/\/$/, "") || "/";
   document.querySelectorAll("#mainnav a").forEach((a) => a.classList.toggle("on", a.getAttribute("href") === path));
   if (path.startsWith("/people")) document.querySelector('#mainnav a[href="/people"]').classList.add("on");
+  if (path.startsWith("/investors")) document.querySelector('#mainnav a[href="/investors"]').classList.add("on");
+  const fund = path.match(/^\/investors\/(\d+)/);
+  if (fund) return renderFund(fund[1]);
   const person = path.match(/^\/people\/([^/]+)/);
   if (person) return renderPerson(decodeURIComponent(person[1]));
   const m = path.match(/^\/stock\/([^/]+)/i);

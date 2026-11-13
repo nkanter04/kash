@@ -218,6 +218,7 @@ function renderOwnership(c, d) {
       (s.buyValue > s.sellValue ? "Insiders buying with their own money is usually a good sign." : "Selling is common (executives are often paid in stock), so it matters less than buying.")
     : "No open-market buying or selling by insiders in the last 6 months.";
   return `
+    <div id="fundBox"></div>
     <div id="polBox"></div>
     <section>${titled("Who owns the stock?", "Big investment firms (institutions) vs. the company's own executives and directors (insiders).")}
       <div class="pills">
@@ -240,7 +241,7 @@ function renderOwnership(c, d) {
       </tbody></table></div></section>` : ""}`;
 }
 
-renderOwnership.after = (c, d) => loadOfficials(d);
+renderOwnership.after = (c, d) => { loadFundHolders(d); loadOfficials(d); };
 
 /* ------------------------------------------------------------ Dividends */
 function renderDividends(c, d) {
