@@ -21,6 +21,7 @@ import pandas as pd
 import yfinance as yf
 
 CACHE = Path(__file__).parent / ".cache"
+SNAPSHOT = Path(__file__).parent / "data"   # committed copies of the member lists
 MEMBERS_TTL = 7 * 86400
 QUOTES_TTL = 120
 UA = {"User-Agent": "Kash/1.0 (personal stock research app)"}
@@ -117,7 +118,12 @@ def members(index: str) -> list[dict]:
     except Exception:
         if path.exists():
             return json.loads(path.read_text(encoding="utf-8"))
-        raise
+        # Wikipedia and Nasdaq often refuse cloud servers (a hosted copy starts with no cache): use the copy shipped in data/,
+        # and keep it for a week before trying the live source again. Membership changes only a few times a year.
+        shipped = SNAPSHOT / f"members_{index}.json"
+        if not shipped.exists():
+            raise
+        rows = json.loads(shipped.read_text(encoding="utf-8"))
     CACHE.mkdir(exist_ok=True)
     path.write_text(json.dumps(rows), encoding="utf-8")
     return rows

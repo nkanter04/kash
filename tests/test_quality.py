@@ -102,3 +102,15 @@ def test_summary_leaves_blanks_for_short_histories_and_bad_share_counts():
     units = fundamentals.summarize(_frames(shares=[100.0] * 5 + [100000.0] * 6))   # a filing switched from thousands to units
     assert units["sh10"] is None and units["sh5"] is None
     assert fundamentals.summarize(None) is None
+
+
+def test_member_lists_fall_back_to_the_shipped_copy(tmp_path, monkeypatch):
+    import json
+    import market
+    monkeypatch.setattr(market, "CACHE", tmp_path / "cache")
+    def refused():
+        raise OSError("HTTP Error 401")
+    monkeypatch.setitem(market.SOURCES, "dow", refused)
+    rows = market.members("dow")
+    assert len(rows) >= 25 and {"symbol", "name", "sector"} <= set(rows[0])
+    assert json.loads((tmp_path / "cache" / "members_dow.json").read_text()) == rows   # kept, so the next call doesn't retry
