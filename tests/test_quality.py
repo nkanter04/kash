@@ -114,3 +114,23 @@ def test_member_lists_fall_back_to_the_shipped_copy(tmp_path, monkeypatch):
     rows = market.members("dow")
     assert len(rows) >= 25 and {"symbol", "name", "sector"} <= set(rows[0])
     assert json.loads((tmp_path / "cache" / "members_dow.json").read_text()) == rows   # kept, so the next call doesn't retry
+
+
+def test_quotes_fall_back_to_chart_data_when_the_screener_refuses(monkeypatch):
+    import market
+    import pandas as pd
+
+    def refused():
+        raise RuntimeError("HTTP Error 401: ")
+    days = pd.date_range("2025-11-01", periods=252, freq="B")
+    bars = pd.DataFrame({"Open": 100.0, "High": [100.0 + i * 0.5 for i in range(252)], "Low": 90.0,
+                         "Close": [100.0 + i * 0.4 for i in range(252)], "Volume": 1e6}, index=days)
+    frame = pd.concat({"AAA": bars}, axis=1)
+    monkeypatch.setattr(market, "_universe", refused)
+    monkeypatch.setattr(market, "members", lambda idx: [{"symbol": "AAA", "name": "Aaa Corp", "sector": "Industrials"}])
+    monkeypatch.setattr(market.yf, "download", lambda *a, **k: frame)
+    monkeypatch.setattr(market, "_mem", {})
+    q = market.quotes_all()["AAA"]
+    price = 100 + 251 * 0.4
+    assert q["price"] == price and q["change"] == pytest.approx((price / (price - 0.4) - 1) * 100)   # percent, like the screener
+    assert q["ch1y"] == pytest.approx(price / 100 - 1) and q["fromHigh"] < 0 and q["ma200"] > 0

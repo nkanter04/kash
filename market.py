@@ -178,7 +178,7 @@ def heatmap(index: str) -> dict:
     """Members grouped by sector, each with market cap (size) and today's % change (color)."""
     if index not in INDEXES:
         raise KeyError(index)
-    quotes = _cached("universe", QUOTES_TTL, _universe)
+    quotes = quotes_all()
     sectors: dict[str, list] = {}
     missing = []
     for m in members(index):
@@ -218,8 +218,52 @@ def _membership() -> dict[str, dict]:
     return out
 
 
+def _chart_universe() -> dict[str, dict]:
+    """Fallback for when Yahoo's screener refuses us (it needs a session cookie that cloud servers often can't get, so a hosted
+    copy sees HTTP 401). The chart API needs no cookie: daily bars give price, today's change, 1-year change, 52-week range,
+    moving averages and volume for the index members. Market cap and P/E use share counts and EPS shipped in data/."""
+    shipped = json.loads((SNAPSHOT / "fundamentals_now.json").read_text(encoding="utf-8"))
+    names = {}
+    for idx in INDEXES:
+        for m in members(idx):
+            names.setdefault(m["symbol"], m["name"])
+    syms = sorted(names)
+    df = yf.download(syms, period="1y", interval="1d", auto_adjust=False, group_by="ticker", progress=False, threads=True)
+    out = {}
+    for sym in syms:
+        try:
+            bars = df[sym].dropna(subset=["Close"])
+        except KeyError:
+            continue
+        if len(bars) < 2:
+            continue
+        close, vol = bars["Close"], bars["Volume"]
+        price, prev = float(close.iloc[-1]), float(close.iloc[-2])
+        hi, lo = float(bars["High"].max()), float(bars["Low"].min())
+        sh, eps = (shipped.get(sym) or {}).get("shares"), (shipped.get(sym) or {}).get("eps")
+        out[sym] = {
+            "cap": price * sh if sh else None, "change": (price / prev - 1) * 100, "price": price, "name": names[sym],
+            "pe": price / eps if eps and eps > 0 else None, "eps": eps,
+            "ch1y": price / float(close.iloc[0]) - 1 if len(close) > 200 else None,
+            "ma50": price / float(close.iloc[-50:].mean()) - 1 if len(close) >= 50 else None,
+            "ma200": price / float(close.iloc[-200:].mean()) - 1 if len(close) >= 200 else None,
+            "fromHigh": price / hi - 1 if hi else None, "fromLow": price / lo - 1 if lo else None,
+            "vol": float(vol.iloc[-1]), "avgVol": float(vol.iloc[-63:].mean()),
+        }
+    return out
+
+
 def quotes_all() -> dict[str, dict]:
-    return _cached("universe", QUOTES_TTL, _universe)
+    return _cached("universe", QUOTES_TTL, _universe_or_charts)
+
+
+def _universe_or_charts() -> dict[str, dict]:
+    try:
+        return _universe()
+    except Exception:
+        if not (SNAPSHOT / "fundamentals_now.json").exists():
+            raise
+        return _cached("chart_universe", 600, _chart_universe)   # slower to build, so kept longer
 
 
 def _row(symbol: str, q: dict, m: dict | None) -> dict:

@@ -93,6 +93,10 @@ Portfolio/Macro/Assets plus the watchlist in `pages.js`; `index.html` calls `rou
   stop the server, delete that file, restart.
 - Both read `.cache/` first and fall back to the committed copies in `data/` (public SEC data), which is what the hosted
   site uses. After a rebuild run `python funds.py snapshot` and `python fundamentals.py snapshot`, then commit `data/`.
+- Hosted (Render) data: Yahoo's screener answers HTTP 401 there (it needs a session cookie cloud IPs don't get) and
+  Wikipedia/Nasdaq refuse the member lists. `market.quotes_all` then builds quotes for the ~520 index members from the
+  chart API (`_chart_universe`, ~27 s, cached 10 min) with market cap and P/E from `data/fundamentals_now.json`
+  (shares, EPS), and `members` uses `data/members_*.json`. Refresh those copies now and then from a working local run.
 - Macro (`macro.py`): FRED CSVs and multpl tables cached on disk with stale fallback; each card builds separately.
   Buffett Indicator = Fed Z.1 corporate equities / GDP, extended to today with the Wilshire 5000.
 - Screener universe: `market._universe` filters to major US exchanges in the query (OTC foreign lines crowd out real
